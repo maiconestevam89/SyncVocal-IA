@@ -52,6 +52,13 @@ export default async function(req) {
       signal: AbortSignal.timeout(60000),
     });
 
+    if (createRes.status === 429) {
+      return Response.json(
+        { error: "Limite do kits.ai: 1 envio por minuto. Aguarde cerca de 1 minuto e tente novamente." },
+        { status: 429 }
+      );
+    }
+
     if (!createRes.ok) {
       const detail = await createRes.text().catch(() => "");
       return Response.json(

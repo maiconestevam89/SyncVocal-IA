@@ -16,10 +16,12 @@ export async function isolateVocal(file, onStatus) {
   // 2. Ask the backend function to run the Kits separation and stream back
   //    the isolated vocal audio bytes.
   onStatus?.("processing");
-  const res = await base44.functions.invoke("isolateVocal", { file_url: signed_url });
-  if (res.status >= 400) {
-    const msg = res.data?.error || "Falha no isolamento de voz.";
-    throw new Error(msg);
+  let res;
+  try {
+    res = await base44.functions.invoke("isolateVocal", { file_url: signed_url });
+  } catch (e) {
+    // Surface the backend's real error instead of the generic "status code 502".
+    throw new Error(e.response?.data?.error || e.message || "Falha no isolamento de voz.");
   }
   // The function returns the raw audio bytes.
   const blob = new Blob([res.data], { type: res.headers?.["content-type"] || "audio/mpeg" });
