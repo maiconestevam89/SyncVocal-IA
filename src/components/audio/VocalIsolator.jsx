@@ -22,7 +22,7 @@ export async function isolateVocal(file, onStatus, { withInstrumental = false } 
   onStatus?.("processing");
   return fetchAudioFromFunction(
     "isolateVocal",
-    { file_url: signed_url },
+    { file_url: signed_url, with_instrumental: withInstrumental },
     {
       errorMessage: "Falha no isolamento de voz.",
       onDecoding: () => onStatus?.("decoding"),
@@ -31,7 +31,7 @@ export async function isolateVocal(file, onStatus, { withInstrumental = false } 
   );
 }
 
-export default function VocalIsolator({ file, onIsolated, onInstrumental, isolated, withInstrumental = false }) {
+export default function VocalIsolator({ file, onIsolated, onInstrumental, isolated, withInstrumental = false, canStart = true }) {
   const [status, setStatus] = useState("idle"); // idle | working | error
   const [message, setMessage] = useState("");
 
@@ -47,7 +47,10 @@ export default function VocalIsolator({ file, onIsolated, onInstrumental, isolat
 
       // With instrumental enabled the helper returns { vocal, instrumental };
       // otherwise it returns a bare AudioBuffer.
-      if (withInstrumental && result?.vocal) {
+      if (withInstrumental) {
+        if (!result?.vocal || !result?.instrumental) {
+          throw new Error("O kits.ai não retornou o instrumental do Áudio 1.");
+        }
         onIsolated(result.vocal);
         onInstrumental?.(result.instrumental);
       } else {
@@ -63,11 +66,20 @@ export default function VocalIsolator({ file, onIsolated, onInstrumental, isolat
 
   // Run isolation automatically when a new file arrives.
   useEffect(() => {
-    if (file && !isolated) run();
+    if (file && !isolated && canStart) run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file]);
+  }, [file, canStart]);
 
   if (!file) return null;
+
+  if (!canStart && !isolated) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+        <span className="truncate">Aguardando o isolamento do Áudio 1 terminar…</span>
+      </div>
+    );
+  }
 
   if (isolated) {
     return (

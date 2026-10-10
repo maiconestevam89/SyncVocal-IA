@@ -25,6 +25,7 @@ export default async function(req) {
 
     const body = await req.json().catch(() => ({}));
     const fileUrl = body?.file_url;
+    const withInstrumental = body?.with_instrumental === true;
     if (!fileUrl || typeof fileUrl !== "string") {
       return Response.json({ error: "Parâmetro file_url ausente." }, { status: 400 });
     }
@@ -122,7 +123,14 @@ export default async function(req) {
     // of Audio 1 as the sync reference and the instrumental as the final bed,
     // so the original voice of Audio 1 never appears in the output.
     const vocalUrl = result?.lossyVocalAudioFileUrl || result?.vocalAudioFileUrl;
-    const instrumentalUrl = result?.lossyInstrumentalAudioFileUrl || result?.instrumentalAudioFileUrl;
+    // Kits exposes the instrumental as the "backing" stem (also available as
+    // the deprecated backingAudioFileUrl field).
+    const findBacking = (stems) =>
+      Array.isArray(stems) ? stems.find((s) => s?.instrument === "backing")?.url : undefined;
+    const instrumentalUrl =
+      findBacking(result?.lossyStemFileUrls) ||
+      findBacking(result?.stemFileUrls) ||
+      result?.backingAudioFileUrl;
     if (!vocalUrl) {
       return Response.json({ error: "Isolamento concluído sem URL de saída." }, { status: 502 });
     }
@@ -141,24 +149,33 @@ export default async function(req) {
     // (prefixed with a 4-byte length marker) after the vocal so the frontend
     // can split the two without an extra round-trip. The marker is a single
     // 32-bit big-endian unsigned int holding the vocal byte length.
-    if (instrumentalUrl) {
-      const instRes = await fetch(instrumentalUrl, { signal: AbortSignal.timeout(60000) });
-      if (instRes.ok) {
-        const instBytes = await instRes.arrayBuffer();
-        const merged = new Uint8Array(audioBytes.byteLength + instBytes.byteLength + 4);
-        const view = new DataView(merged.buffer);
-        view.setUint32(0, audioBytes.byteLength, false); // big-endian
-        merged.set(new Uint8Array(audioBytes), 4);
-        merged.set(new Uint8Array(instBytes), 4 + audioBytes.byteLength);
-        return new Response(merged.buffer, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/octet-stream",
-            "Cache-Control": "no-store",
-          },
-        });
+    // Only merged when the caller asks for it (Audio 1). If it was requested
+    // but can't be delivered, fail loudly instead of silently returning only
+    // the vocal — the app needs the instrumental for the final mix.
+    if (withInstrumental) {
+      if (!instrumentalUrl) {
+        return Response.json({ error: "O kits.ai não retornou o instrumental do Áudio 1." }, { status: 502 });
       }
-      // If the instrumental download failed, fall back to vocal-only.
+      const instRes = await fetch(instrumentalUrl, { signal: AbortSignal.timeout(60000) });
+      if (!instRes.ok) {
+        return Response.json(
+          { error: `Falha ao baixar instrumental isolado: ${instRes.status}` },
+          { status: 502 }
+        );
+      }
+      const instBytes = await instRes.arrayBuffer();
+      const merged = new Uint8Array(audioBytes.byteLength + instBytes.byteLength + 4);
+      const view = new DataView(merged.buffer);
+      view.setUint32(0, audioBytes.byteLength, false); // big-endian
+      merged.set(new Uint8Array(audioBytes), 4);
+      merged.set(new Uint8Array(instBytes), 4 + audioBytes.byteLength);
+      return new Response(merged.buffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
     // Kits returns the original container (wav/mp3/etc); echo its content type.

@@ -136,7 +136,7 @@ export default function Studio() {
 
   // Ready when the isolated reference AND the real instrumental are available
   // (both come from isolating Audio 1), plus a vocal to sync.
-  const ready = isolatedBuffer1 && instrumentalBuffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
+  const ready = isolatedBuffer1 && instrumentalBuffer1 && isolatedBuffer2 && stage === "upload";
 
   // The vocal that's currently "active" for preview / processing.
   const activeVocal2 = repairedBuffer2 || isolatedBuffer2 || buffer2;
@@ -226,6 +226,7 @@ export default function Studio() {
                     file={file2}
                     isolated={isolatedBuffer2}
                     onIsolated={setIsolatedBuffer2}
+                    canStart={!file1 || !!(isolatedBuffer1 && instrumentalBuffer1)}
                   />
                   {isolatedBuffer2 && (
                     <ManualRepair

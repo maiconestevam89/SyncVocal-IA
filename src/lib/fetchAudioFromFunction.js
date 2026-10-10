@@ -34,14 +34,10 @@ export async function fetchAudioFromFunction(name, payload, { errorMessage, onDe
       const instBytes = bytes.slice(4 + vocalLen);
       onDecoding?.();
       const vocal = await decodeAudioFile(new File([vocalBytes], "vocal.mp3", { type: "audio/mpeg" }));
-      let instrumental = null;
-      try {
-        instrumental = await decodeAudioFile(new File([instBytes], "instrumental.mp3", { type: "audio/mpeg" }));
-      } catch {
-        // If the instrumental decode fails, return the vocal only.
-      }
+      const instrumental = await decodeAudioFile(new File([instBytes], "instrumental.mp3", { type: "audio/mpeg" }));
       return { vocal, instrumental };
     }
+    throw new Error("O kits.ai não retornou o instrumental do Áudio 1.");
   }
 
   onDecoding?.();
