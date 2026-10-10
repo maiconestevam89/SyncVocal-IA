@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { base44 } from "@/api/base44Client";
+import { fetchAudioFromFunction } from "@/lib/fetchAudioFromFunction";
 
 // Sends an isolated-vocal AudioBuffer to the Kits.ai AI Vocal Repair backend
 // function and returns the decoded repaired AudioBuffer.
@@ -22,28 +23,12 @@ export async function repairVocal(buffer, onStatus) {
 
   // 4. Run the repair job on the backend.
   onStatus?.("processing");
-  let res;
-  try {
-    res = await base44.functions.invoke("repairVocal", { file_url: signed_url });
-  } catch (e) {
-    throw new Error(e.response?.data?.error || e.message || "Falha no reparo de voz.");
-  }
-  if (res.status >= 400) {
-    const msg = res.data?.error || "Falha no reparo de voz.";
-    throw new Error(msg);
-  }
-
-  // 4. Decode the repaired audio bytes back into an AudioBuffer.
-  onStatus?.("decoding");
-  const outBlob = new Blob([res.data], { type: res.headers?.["content-type"] || "audio/mpeg" });
-  const arrayBuffer = await outBlob.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
-  try {
-    return await ctx.decodeAudioData(arrayBuffer.slice(0));
-  } finally {
-    ctx.close();
-  }
+  // 5. The function returns the repaired audio bytes; decode into an AudioBuffer.
+  return fetchAudioFromFunction(
+    "repairVocal",
+    { file_url: signed_url },
+    { errorMessage: "Falha no reparo de voz.", onDecoding: () => onStatus?.("decoding") }
+  );
 }
 
 // Minimal 16-bit PCM WAV encoder for the buffer's first channel.

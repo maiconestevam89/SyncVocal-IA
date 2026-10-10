@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { base44 } from "@/api/base44Client";
+import { fetchAudioFromFunction } from "@/lib/fetchAudioFromFunction";
 
 // Sends the uploaded audio file to the Kits.ai vocal isolation backend
 // function and returns the decoded isolated-vocal AudioBuffer.
@@ -16,24 +17,12 @@ export async function isolateVocal(file, onStatus) {
   // 2. Ask the backend function to run the Kits separation and stream back
   //    the isolated vocal audio bytes.
   onStatus?.("processing");
-  let res;
-  try {
-    res = await base44.functions.invoke("isolateVocal", { file_url: signed_url });
-  } catch (e) {
-    // Surface the backend's real error instead of the generic "status code 502".
-    throw new Error(e.response?.data?.error || e.message || "Falha no isolamento de voz.");
-  }
-  // The function returns the raw audio bytes.
-  const blob = new Blob([res.data], { type: res.headers?.["content-type"] || "audio/mpeg" });
-  onStatus?.("decoding");
-  const arrayBuffer = await blob.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
-  try {
-    return await ctx.decodeAudioData(arrayBuffer.slice(0));
-  } finally {
-    ctx.close();
-  }
+  // The function returns the raw audio bytes of the isolated vocal.
+  return fetchAudioFromFunction(
+    "isolateVocal",
+    { file_url: signed_url },
+    { errorMessage: "Falha no isolamento de voz.", onDecoding: () => onStatus?.("decoding") }
+  );
 }
 
 export default function VocalIsolator({ file, onIsolated, isolated }) {
