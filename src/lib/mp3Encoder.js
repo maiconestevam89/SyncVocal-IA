@@ -1,4 +1,4 @@
-import lame from "lamejs";
+import lame from "@breezystack/lamejs";
 
 // Encode an AudioBuffer into an MP3 Blob at the given bitrate (kbps).
 export function audioBufferToMp3Blob(buffer, bitrate = 128) {
