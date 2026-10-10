@@ -7,7 +7,7 @@ import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
 import VocalIsolator from "@/components/audio/VocalIsolator";
-import VocalRepair from "@/components/audio/VocalRepair";
+import ManualRepair from "@/components/audio/ManualRepair";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
 
@@ -186,7 +186,7 @@ export default function Studio() {
                     onIsolated={setIsolatedBuffer2}
                   />
                   {isolatedBuffer2 && (
-                    <VocalRepair
+                    <ManualRepair
                       buffer={isolatedBuffer2}
                       repaired={repairedBuffer2}
                       onRepaired={setRepairedBuffer2}
