@@ -6,6 +6,7 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
+import VocalIsolator from "@/components/audio/VocalIsolator";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
 
@@ -27,6 +28,7 @@ export default function Studio() {
   const [file2, setFile2] = useState(null);
   const [buffer1, setBuffer1] = useState(null);
   const [buffer2, setBuffer2] = useState(null);
+  const [isolatedBuffer2, setIsolatedBuffer2] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [stage, setStage] = useState("upload"); // upload | processing | result
   const [activeStep, setActiveStep] = useState(null);
@@ -56,15 +58,22 @@ export default function Studio() {
     };
   }, [file2]);
 
+  // Reset the isolated vocal whenever the uploaded file changes.
+  useEffect(() => {
+    setIsolatedBuffer2(null);
+  }, [file2]);
+
   const autoSync = () => {
-    if (!buffer1 || !buffer2) return;
-    const ratio = buffer2.duration / buffer1.duration;
+    const vocal = isolatedBuffer2 || buffer2;
+    if (!buffer1 || !vocal) return;
+    const ratio = vocal.duration / buffer1.duration;
     const clamped = Math.max(0.5, Math.min(2, ratio));
     setSettings((s) => ({ ...s, tempoRatio: clamped, autoSync: false }));
   };
 
   const process = async () => {
-    if (!buffer1 || !buffer2) return;
+    const vocal = isolatedBuffer2 || buffer2;
+    if (!buffer1 || !vocal) return;
     setError(null);
     setStage("processing");
     try {
@@ -72,7 +81,7 @@ export default function Studio() {
       await new Promise((r) => setTimeout(r, 500));
 
       setActiveStep("sync");
-      const aligned = await alignVocal(buffer1, buffer2, settings);
+      const aligned = await alignVocal(buffer1, vocal, settings);
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
@@ -91,9 +100,10 @@ export default function Studio() {
     setStage("upload");
     setRendered(null);
     setSettings(DEFAULT_SETTINGS);
+    setIsolatedBuffer2(null);
   };
 
-  const ready = buffer1 && buffer2 && stage === "upload";
+  const ready = buffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
 
   return (
     <div className="min-h-screen bg-background">
@@ -129,9 +139,10 @@ export default function Studio() {
                   Sincronize seu vocal com uma referência de IA
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Envie a voz da IA e a sua voz, ambas já isoladas. Sua voz passa a seguir o
-                  andamento, os silêncios e a duração do Áudio 1. Tudo é processado no seu
-                  navegador, sem custo de API.
+                  Envie a voz da IA (Áudio 1) e a sua voz humana (Áudio 2). Você pode isolar o
+                  vocal do Áudio 2 com o kits.ai antes de sincronizar — sua voz passa a seguir o
+                  andamento, os silêncios e a duração do Áudio 1. O processamento final roda no
+                  navegador, sem custo de API por sincronização.
                 </p>
               </div>
 
@@ -155,9 +166,22 @@ export default function Studio() {
                   <WaveformPlayer buffer={buffer1} label="Referência" />
                 </div>
               )}
+              {file2 && (
+                <div className="space-y-3">
+                  <VocalIsolator
+                    file={file2}
+                    isolated={isolatedBuffer2}
+                    onIsolated={setIsolatedBuffer2}
+                  />
+                </div>
+              )}
               {buffer2 && (
                 <div className="rounded-2xl border bg-card p-5">
-                  <WaveformPlayer buffer={buffer2} label="Vocal" accent />
+                  <WaveformPlayer
+                    buffer={isolatedBuffer2 || buffer2}
+                    label={isolatedBuffer2 ? "Vocal isolado" : "Vocal"}
+                    accent
+                  />
                 </div>
               )}
 
