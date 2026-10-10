@@ -29,7 +29,7 @@ export async function fetchAudioFromFunction(name, payload, { errorMessage, onDe
   if (withInstrumental && type.includes("octet-stream") && bytes.byteLength > 4) {
     const view = new DataView(bytes);
     const vocalLen = view.getUint32(0, false); // big-endian
-    if (vocalLen > 0 && vocalLen + 4 < bytes.byteLength) {
+    if (vocalLen > 0 && vocalLen + 4 <= bytes.byteLength) {
       const vocalBytes = bytes.slice(4, 4 + vocalLen);
       const instBytes = bytes.slice(4 + vocalLen);
       onDecoding?.();
