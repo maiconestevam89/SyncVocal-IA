@@ -109,12 +109,33 @@ export async function isolateVocal(buffer, strength = 0.7) {
   return mix;
 }
 
+// Detect the first non-silent sample of a buffer (in seconds).
+// Returns the time where audio content effectively starts, based on an
+// RMS window over the first channel. Used to auto-align the vocal to the
+// reference's entrance instead of forcing a manual offset.
+export function detectAudioStart(buffer, { threshold = 0.02, windowMs = 30 } = {}) {
+  const rate = buffer.sampleRate;
+  const data = buffer.getChannelData(0);
+  const win = Math.max(1, Math.floor((windowMs / 1000) * rate));
+  let i = 0;
+  while (i < data.length) {
+    let sumSq = 0;
+    const end = Math.min(i + win, data.length);
+    for (let j = i; j < end; j++) sumSq += data[j] * data[j];
+    const rms = Math.sqrt(sumSq / (end - i));
+    if (rms > threshold) return i / rate;
+    i = end;
+  }
+  return 0;
+}
+
 // Render the final mix into an AudioBuffer using an OfflineAudioContext.
 // `referenceBuffer` = AI/reference track, `vocalBuffer` = user's raw vocal.
 export async function renderMix(referenceBuffer, vocalBuffer, settings) {
   const {
     tempoRatio = 1,
     offsetSec = 0,
+    autoAlign = true,
     preservePitch = true,
     mix = { reference: 0.8, vocal: 1 },
     eq = {},
@@ -124,7 +145,10 @@ export async function renderMix(referenceBuffer, vocalBuffer, settings) {
   } = settings;
 
   const ratio = clamp(tempoRatio, 0.5, 2);
-  const offset = clamp(offsetSec, -3, 8);
+  // When auto-align is on, the vocal waits for the reference's first non-silent
+  // onset so the singer enters exactly when the backing track starts.
+  const refStart = autoAlign ? detectAudioStart(referenceBuffer) : 0;
+  const offset = clamp(Math.max(refStart, offsetSec), 0, 8);
   const sampleRate = referenceBuffer.sampleRate;
   const refDur = referenceBuffer.duration;
   const vocalDur = vocalBuffer.duration / ratio;

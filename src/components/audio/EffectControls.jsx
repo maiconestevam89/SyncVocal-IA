@@ -66,6 +66,9 @@ export default function EffectControls({ settings, onChange }) {
       {/* Alignment */}
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Alinhamento de Tempo</h4>
+        <p className="text-xs text-muted-foreground -mt-2">
+          O vocal começa automaticamente quando a referência inicia — respeitando o silêncio inicial.
+        </p>
         <Field
           label="Andamento (tempo)"
           value={settings.tempoRatio.toFixed(2)}
@@ -74,15 +77,6 @@ export default function EffectControls({ settings, onChange }) {
           max={2}
           step={0.01}
           onChange={(v) => set({ tempoRatio: v })}
-        />
-        <Field
-          label="Deslocamento inicial"
-          value={settings.offsetSec.toFixed(2)}
-          suffix="s"
-          min={-3}
-          max={8}
-          step={0.05}
-          onChange={(v) => set({ offsetSec: v })}
         />
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Preservar tom da voz</Label>

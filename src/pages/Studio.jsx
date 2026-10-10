@@ -11,6 +11,7 @@ import { decodeAudioFile, renderMix, isolateVocal } from "@/lib/audioEngine";
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
   offsetSec: 0,
+  autoAlign: true,
   preservePitch: true,
   isolate: { enabled: false, strength: 0.7 },
   mix: { reference: 0.8, vocal: 1 },
@@ -73,7 +74,7 @@ export default function Studio() {
       let vocalForMix = buffer2;
       if (settings.isolate?.enabled) {
         setActiveStep("isolate");
-        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength, "vocal");
+        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength);
       }
 
       setActiveStep("sync");
