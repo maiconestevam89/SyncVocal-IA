@@ -10,11 +10,13 @@ export async function isolateVocal(file, onStatus) {
   //    by file_uri — the SDK invoke() payload must be JSON-serializable.
   onStatus?.("uploading");
   const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+  // Create a signed URL so the backend function can fetch the private file.
+  const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri });
 
   // 2. Ask the backend function to run the Kits separation and stream back
   //    the isolated vocal audio bytes.
   onStatus?.("processing");
-  const res = await base44.functions.invoke("isolateVocal", { file_uri });
+  const res = await base44.functions.invoke("isolateVocal", { file_url: signed_url });
   if (res.status >= 400) {
     const msg = res.data?.error || "Falha no isolamento de voz.";
     throw new Error(msg);

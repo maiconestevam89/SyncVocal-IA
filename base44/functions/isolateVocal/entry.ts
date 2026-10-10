@@ -22,13 +22,13 @@ export default async function(req) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const fileUri = body?.file_uri;
-    if (!fileUri || typeof fileUri !== "string") {
-      return Response.json({ error: "Parâmetro file_uri ausente." }, { status: 400 });
+    const fileUrl = body?.file_url;
+    if (!fileUrl || typeof fileUrl !== "string") {
+      return Response.json({ error: "Parâmetro file_url ausente." }, { status: 400 });
     }
 
-    // Download the uploaded audio bytes from private storage.
-    const fileRes = await fetch(fileUri, { signal: AbortSignal.timeout(60000) });
+    // Download the uploaded audio bytes via the signed URL.
+    const fileRes = await fetch(fileUrl, { signal: AbortSignal.timeout(60000) });
     if (!fileRes.ok) {
       return Response.json(
         { error: `Falha ao ler arquivo enviado: ${fileRes.status}` },
@@ -37,7 +37,7 @@ export default async function(req) {
     }
     const fileBytes = await fileRes.arrayBuffer();
     const fileContentType = fileRes.headers.get("content-type") || "audio/mpeg";
-    const ext = (fileUri.split(".").pop() || "mp3").split("?")[0].toLowerCase();
+    const ext = (fileUrl.split(".").pop() || "mp3").split("?")[0].toLowerCase();
     const filename = `input.${ext}`;
 
     // Build the multipart body Kits expects (field name "inputFile").
