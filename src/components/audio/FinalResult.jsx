@@ -43,6 +43,13 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
     return () => { alive = false; };
   }, [tracks]);
 
+  const downloadBlob = (blob, name) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   const doExport = async (format) => {
     if (!mixed) return;
     setBusy(format);
@@ -50,13 +57,26 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
       let blob, name;
       if (format === "wav") { blob = audioBufferToWavBlob(mixed); name = "syncvocal.wav"; }
       else { blob = audioBufferToMp3Blob(mixed, 192); name = "syncvocal.mp3"; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadBlob(blob, name);
       setExportResult(`${name} pronto (${mixed.duration.toFixed(1)}s)`);
     } catch (e) {
       setExportResult(e.message || "Erro ao exportar.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doExportPlayback = async (format) => {
+    if (!instrumentalBuffer) return;
+    setBusy(`playback-${format}`);
+    try {
+      let blob, name;
+      if (format === "wav") { blob = audioBufferToWavBlob(instrumentalBuffer); name = "playback.wav"; }
+      else { blob = audioBufferToMp3Blob(instrumentalBuffer, 192); name = "playback.mp3"; }
+      downloadBlob(blob, name);
+      setExportResult(`${name} pronto (${instrumentalBuffer.duration.toFixed(1)}s)`);
+    } catch (e) {
+      setExportResult(e.message || "Erro ao exportar playback.");
     } finally {
       setBusy(null);
     }
@@ -92,15 +112,35 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Button size="lg" variant="outline" onClick={() => doExport("wav")} disabled={!!busy || !mixed || mixing} className="h-12 flex-1">
-          {busy === "wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
-          Baixar WAV
-        </Button>
-        <Button size="lg" onClick={() => doExport("mp3")} disabled={!!busy || !mixed || mixing} className="h-12 flex-1">
-          {busy === "mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
-          Baixar MP3
-        </Button>
+      <div className="space-y-4">
+        <div>
+          <p className="mb-2 text-sm font-medium">Mixagem final (voz + instrumental)</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button size="lg" variant="outline" onClick={() => doExport("wav")} disabled={!!busy || !mixed || mixing} className="h-12 flex-1">
+              {busy === "wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+              Baixar WAV
+            </Button>
+            <Button size="lg" onClick={() => doExport("mp3")} disabled={!!busy || !mixed || mixing} className="h-12 flex-1">
+              {busy === "mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+              Baixar MP3
+            </Button>
+          </div>
+        </div>
+        {instrumentalBuffer && (
+          <div>
+            <p className="mb-2 text-sm font-medium">Playback (somente instrumental)</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button size="lg" variant="outline" onClick={() => doExportPlayback("wav")} disabled={!!busy || mixing} className="h-12 flex-1">
+                {busy === "playback-wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+                Baixar WAV
+              </Button>
+              <Button size="lg" variant="outline" onClick={() => doExportPlayback("mp3")} disabled={!!busy || mixing} className="h-12 flex-1">
+                {busy === "playback-mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+                Baixar MP3
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
       {exportResult && <p className="text-sm text-muted-foreground">{exportResult}</p>}
     </div>
