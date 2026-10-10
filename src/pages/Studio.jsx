@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   offsetSec: 0,
   preservePitch: true,
   isolate: { enabled: false, strength: 0.7 },
+  removeRefVocal: true,
   mix: { reference: 0.8, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
   reverb: { amount: 0.25, duration: 2, decay: 2 },
@@ -69,11 +70,19 @@ export default function Studio() {
       setActiveStep("decode");
       await new Promise((r) => setTimeout(r, 500));
 
+      // Optional: remove the lead voice from the reference track so only the
+      // instrumental bed remains under the user's vocal.
+      let refForMix = buffer1;
+      if (settings.removeRefVocal) {
+        setActiveStep("isolate");
+        refForMix = await isolateVocal(buffer1, 0.9, "remove");
+      }
+
       // Optional vocal isolation on the vocal track (Áudio 2) before mix.
       let vocalForMix = buffer2;
       if (settings.isolate?.enabled) {
         setActiveStep("isolate");
-        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength);
+        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength, "vocal");
       }
 
       setActiveStep("sync");
@@ -81,7 +90,7 @@ export default function Studio() {
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 600));
       setActiveStep("render");
-      const rendered = await renderMix(buffer1, vocalForMix, settings);
+      const rendered = await renderMix(refForMix, vocalForMix, settings);
       setRendered(rendered);
       setStage("result");
     } catch (e) {
