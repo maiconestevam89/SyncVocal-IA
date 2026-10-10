@@ -16,9 +16,18 @@ export async function repairVocal(buffer, onStatus) {
   const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
   const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri });
 
-  // 3. Run the repair job on the backend.
+  // 3. Wait out the Kits 1-POST-per-minute limit before sending the repair.
+  onStatus?.("waiting");
+  await new Promise((r) => setTimeout(r, 70000));
+
+  // 4. Run the repair job on the backend.
   onStatus?.("processing");
-  const res = await base44.functions.invoke("repairVocal", { file_url: signed_url });
+  let res;
+  try {
+    res = await base44.functions.invoke("repairVocal", { file_url: signed_url });
+  } catch (e) {
+    throw new Error(e.response?.data?.error || e.message || "Falha no reparo de voz.");
+  }
   if (res.status >= 400) {
     const msg = res.data?.error || "Falha no reparo de voz.";
     throw new Error(msg);
@@ -87,6 +96,7 @@ export default function VocalRepair({ buffer, onRepaired, repaired }) {
     try {
       const out = await repairVocal(buffer, (s) => {
         if (s === "uploading") setMessage("Enviando para o kits.ai…");
+        else if (s === "waiting") setMessage("Aguardando limite de 1 envio por minuto do kits.ai…");
         else if (s === "processing") setMessage("Reparando voz no kits.ai…");
         else if (s === "decoding") setMessage("Decodificando vocal reparado…");
       });

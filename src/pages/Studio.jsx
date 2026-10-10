@@ -7,6 +7,7 @@ import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
 import VocalIsolator from "@/components/audio/VocalIsolator";
+import VocalRepair from "@/components/audio/VocalRepair";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
 
@@ -29,6 +30,7 @@ export default function Studio() {
   const [buffer1, setBuffer1] = useState(null);
   const [buffer2, setBuffer2] = useState(null);
   const [isolatedBuffer2, setIsolatedBuffer2] = useState(null);
+  const [repairedBuffer2, setRepairedBuffer2] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [stage, setStage] = useState("upload"); // upload | processing | result
   const [activeStep, setActiveStep] = useState(null);
@@ -61,10 +63,16 @@ export default function Studio() {
   // Reset the isolated vocal whenever the uploaded file changes.
   useEffect(() => {
     setIsolatedBuffer2(null);
+    setRepairedBuffer2(null);
   }, [file2]);
 
+  // Reset the repaired vocal whenever the isolated vocal changes.
+  useEffect(() => {
+    setRepairedBuffer2(null);
+  }, [isolatedBuffer2]);
+
   const autoSync = () => {
-    const vocal = isolatedBuffer2 || buffer2;
+    const vocal = repairedBuffer2 || isolatedBuffer2 || buffer2;
     if (!buffer1 || !vocal) return;
     const ratio = vocal.duration / buffer1.duration;
     const clamped = Math.max(0.5, Math.min(2, ratio));
@@ -72,7 +80,7 @@ export default function Studio() {
   };
 
   const process = async () => {
-    const vocal = isolatedBuffer2 || buffer2;
+    const vocal = repairedBuffer2 || isolatedBuffer2 || buffer2;
     if (!buffer1 || !vocal) return;
     setError(null);
     setStage("processing");
@@ -101,12 +109,13 @@ export default function Studio() {
     setRendered(null);
     setSettings(DEFAULT_SETTINGS);
     setIsolatedBuffer2(null);
+    setRepairedBuffer2(null);
   };
 
   const ready = buffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
 
   // The vocal that's currently "active" for preview / processing.
-  const activeVocal2 = isolatedBuffer2 || buffer2;
+  const activeVocal2 = repairedBuffer2 || isolatedBuffer2 || buffer2;
 
   return (
     <div className="min-h-screen bg-background">
@@ -176,13 +185,26 @@ export default function Studio() {
                     isolated={isolatedBuffer2}
                     onIsolated={setIsolatedBuffer2}
                   />
+                  {isolatedBuffer2 && (
+                    <VocalRepair
+                      buffer={isolatedBuffer2}
+                      repaired={repairedBuffer2}
+                      onRepaired={setRepairedBuffer2}
+                    />
+                  )}
                 </div>
               )}
               {buffer2 && (
                 <div className="rounded-2xl border bg-card p-5">
                   <WaveformPlayer
                     buffer={activeVocal2}
-                    label={isolatedBuffer2 ? "Vocal isolado" : "Vocal"}
+                    label={
+                      repairedBuffer2
+                        ? "Vocal reparado"
+                        : isolatedBuffer2
+                        ? "Vocal isolado"
+                        : "Vocal"
+                    }
                     accent
                   />
                 </div>
