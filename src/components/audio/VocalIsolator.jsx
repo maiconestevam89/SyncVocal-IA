@@ -5,8 +5,11 @@ import { base44 } from "@/api/base44Client";
 import { fetchAudioFromFunction } from "@/lib/fetchAudioFromFunction";
 
 // Sends the uploaded audio file to the Kits.ai vocal isolation backend
-// function and returns the decoded isolated-vocal AudioBuffer.
-export async function isolateVocal(file, onStatus) {
+// function and returns the decoded isolated-vocal AudioBuffer. When
+// `withInstrumental` is true, the backend also returns the instrumental
+// (original track with the vocal removed) and this helper resolves to
+// { vocal, instrumental } instead of a bare AudioBuffer.
+export async function isolateVocal(file, onStatus, { withInstrumental = false } = {}) {
   // 1. Upload to private storage so the backend function can fetch the bytes
   //    by file_uri — the SDK invoke() payload must be JSON-serializable.
   onStatus?.("uploading");
@@ -15,17 +18,20 @@ export async function isolateVocal(file, onStatus) {
   const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri });
 
   // 2. Ask the backend function to run the Kits separation and stream back
-  //    the isolated vocal audio bytes.
+  //    the isolated vocal audio bytes (and the instrumental when requested).
   onStatus?.("processing");
-  // The function returns the raw audio bytes of the isolated vocal.
   return fetchAudioFromFunction(
     "isolateVocal",
     { file_url: signed_url },
-    { errorMessage: "Falha no isolamento de voz.", onDecoding: () => onStatus?.("decoding") }
+    {
+      errorMessage: "Falha no isolamento de voz.",
+      onDecoding: () => onStatus?.("decoding"),
+      withInstrumental,
+    }
   );
 }
 
-export default function VocalIsolator({ file, onIsolated, isolated }) {
+export default function VocalIsolator({ file, onIsolated, onInstrumental, isolated, withInstrumental = false }) {
   const [status, setStatus] = useState("idle"); // idle | working | error
   const [message, setMessage] = useState("");
 
@@ -34,11 +40,19 @@ export default function VocalIsolator({ file, onIsolated, isolated }) {
     setStatus("working");
     setMessage("Enviando para o kits.ai…");
     try {
-      const buffer = await isolateVocal(file, (s) => {
+      const result = await isolateVocal(file, (s) => {
         if (s === "processing") setMessage("Isolando voz no kits.ai… (pode levar até 2 min se o limite de envio for atingido)");
         else if (s === "decoding") setMessage("Decodificando vocal isolado…");
-      });
-      onIsolated(buffer);
+      }, { withInstrumental });
+
+      // With instrumental enabled the helper returns { vocal, instrumental };
+      // otherwise it returns a bare AudioBuffer.
+      if (withInstrumental && result?.vocal) {
+        onIsolated(result.vocal);
+        onInstrumental?.(result.instrumental);
+      } else {
+        onIsolated(result);
+      }
       setStatus("idle");
       setMessage("");
     } catch (e) {

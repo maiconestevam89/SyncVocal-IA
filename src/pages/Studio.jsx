@@ -30,6 +30,7 @@ export default function Studio() {
   const [buffer1, setBuffer1] = useState(null);
   const [buffer2, setBuffer2] = useState(null);
   const [isolatedBuffer1, setIsolatedBuffer1] = useState(null);
+  const [instrumentalBuffer1, setInstrumentalBuffer1] = useState(null);
   const [isolatedBuffer2, setIsolatedBuffer2] = useState(null);
   const [repairedBuffer2, setRepairedBuffer2] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -64,6 +65,7 @@ export default function Studio() {
   // Reset the isolated vocal whenever the uploaded file changes.
   useEffect(() => {
     setIsolatedBuffer1(null);
+    setInstrumentalBuffer1(null);
   }, [file1]);
 
   useEffect(() => {
@@ -103,9 +105,12 @@ export default function Studio() {
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
+      // Use the real instrumental (Audio 1 with the vocal removed) so the
+      // original voice of Audio 1 never appears in the output. Fall back to
+      // the full Audio 1 only if the instrumental wasn't isolated.
       const rendered = await renderMix(reference, aligned.buffer, settings, {
         ...aligned,
-        instrumentalBuffer: buffer1,
+        instrumentalBuffer: instrumentalBuffer1 || buffer1,
       });
       setRendered(rendered);
       setStage("result");
@@ -122,6 +127,7 @@ export default function Studio() {
     setRendered(null);
     setSettings(DEFAULT_SETTINGS);
     setIsolatedBuffer1(null);
+    setInstrumentalBuffer1(null);
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
   };
@@ -159,7 +165,7 @@ export default function Studio() {
           <MixEditor
             initialBuffer={rendered}
             initialLabel="Voz sincronizada"
-            instrumentalBuffer={buffer1}
+            instrumentalBuffer={instrumentalBuffer1 || buffer1}
           />
         ) : (
           <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
@@ -198,6 +204,8 @@ export default function Studio() {
                     file={file1}
                     isolated={isolatedBuffer1}
                     onIsolated={setIsolatedBuffer1}
+                    onInstrumental={setInstrumentalBuffer1}
+                    withInstrumental
                   />
                 </div>
               )}
