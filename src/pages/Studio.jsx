@@ -6,7 +6,7 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
-import { decodeAudioFile, renderMix, isolateVocal } from "@/lib/audioEngine";
+import { decodeAudioFile, renderMix, isolateVocal, isolateVocalFal } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
 
 const DEFAULT_SETTINGS = {
@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS = {
   autoAlign: true,
   autoSync: true,
   preservePitch: true,
-  isolate: { enabled: false, strength: 0.7 },
+  isolate: { enabled: false, method: "local", strength: 0.7 },
   mix: { reference: 0.8, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
   reverb: { amount: 0.25, duration: 2, decay: 2 },
@@ -76,7 +76,9 @@ export default function Studio() {
       let vocalForMix = buffer2;
       if (settings.isolate?.enabled) {
         setActiveStep("isolate");
-        vocalForMix = await isolateVocal(buffer2);
+        vocalForMix = settings.isolate.method === "ai"
+          ? await isolateVocalFal(buffer2)
+          : await isolateVocal(buffer2);
       }
 
       setActiveStep("sync");

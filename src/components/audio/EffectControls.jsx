@@ -33,7 +33,7 @@ export default function EffectControls({ settings, onChange }) {
   const setDelay = (patch) => set({ delay: { ...settings.delay, ...patch } });
   const setComp = (patch) => set({ compressor: { ...settings.compressor, ...patch } });
   const setIsolate = (patch) =>
-    set({ isolate: { ...settings.isolate, ...patch } });
+    set({ isolate: { ...settings.isolate, method: "local", ...patch } });
 
   return (
     <div className="space-y-6">
@@ -51,6 +51,30 @@ export default function EffectControls({ settings, onChange }) {
             onCheckedChange={(v) => setIsolate({ enabled: v })}
           />
         </div>
+        {settings.isolate.enabled && (
+          <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+            <Label className="text-xs text-muted-foreground">Método de separação</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">Filtro local (instantâneo)</Label>
+              <Switch
+                checked={settings.isolate.method !== "ai"}
+                onCheckedChange={(v) => setIsolate({ method: v ? "local" : "ai" })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">IA · Demucs no fal.ai</Label>
+              <Switch
+                checked={settings.isolate.method === "ai"}
+                onCheckedChange={(v) => setIsolate({ method: v ? "ai" : "local" })}
+              />
+            </div>
+            {settings.isolate.method === "ai" && (
+              <p className="text-xs text-muted-foreground">
+                Envia o Áudio 2 ao fal.ai para separar a voz dos instrumentos. Consome créditos do fal.ai e pode levar alguns minutos.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="h-px bg-border" />

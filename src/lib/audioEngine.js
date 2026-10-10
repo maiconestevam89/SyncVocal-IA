@@ -1,5 +1,31 @@
+import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 // Client-side audio engine using the Web Audio API.
 // Decodes uploaded files, renders a time-aligned + effected mix offline.
+
+// Isolate the vocal from an AudioBuffer by sending it to Demucs on fal.ai.
+// The base64 audio round-trips through a backend function that holds the API
+// key server-side; nothing secret ever reaches the browser.
+export async function isolateVocalFal(buffer) {
+  const blob = audioBufferToWavBlob(buffer);
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const audio_base64 = btoa(binary);
+
+  const base44 = (await import("@/api/base44Client")).base44;
+  const res = await base44.functions.invoke("isolateVocalsFal", {
+    audio_base64,
+    mime: "audio/wav",
+  });
+  const data = res?.data;
+  if (!data || !data.audio_base64) throw new Error(data?.error || "fal.ai não retornou o stem");
+
+  const b64 = data.audio_base64;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return decodeAudioFile(new File([out], "vocals.wav", { type: "audio/wav" }));
+}
 
 // Decode an uploaded audio File into an AudioBuffer.
 export async function decodeAudioFile(file) {
