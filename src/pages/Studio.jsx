@@ -169,6 +169,7 @@ export default function Studio() {
             initialBuffer={rendered}
             initialLabel="Voz sincronizada"
             instrumentalBuffer={instrumentalBuffer1 || buffer1}
+            onReset={reset}
           />
         ) : (
           <div className="grid gap-8 lg:grid-cols-[1fr_340px]">

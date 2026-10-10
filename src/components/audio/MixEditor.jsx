@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Pause, Plus, Download, Loader2, Volume2, Headphones, Trash2, Scale } from "lucide-react";
+import { Play, Pause, Plus, Download, Loader2, Volume2, Headphones, Trash2, Scale, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { decodeAudioFile } from "@/lib/audioEngine";
@@ -104,7 +104,7 @@ function usePlayback(tracks) {
   return { playing, progress, duration, toggle, stop, maxDur };
 }
 
-export default function MixEditor({ initialBuffer, initialLabel, instrumentalBuffer }) {
+export default function MixEditor({ initialBuffer, initialLabel, instrumentalBuffer, onReset }) {
   const [tracks, setTracks] = useState(() => {
     const initial = [];
     if (initialBuffer) {
@@ -205,8 +205,13 @@ export default function MixEditor({ initialBuffer, initialLabel, instrumentalBuf
             paneamento e mute/solo, e exporte a mixagem final em um único áudio.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
-          {fmt(duration)}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground tabular-nums">{fmt(duration)}</span>
+          {onReset && (
+            <Button variant="outline" size="sm" onClick={onReset}>
+              <RotateCcw className="mr-1 h-4 w-4" /> Novo projeto
+            </Button>
+          )}
         </div>
       </div>
 
