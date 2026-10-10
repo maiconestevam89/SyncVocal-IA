@@ -82,6 +82,41 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
     }
   };
 
+  // Cria um AudioBuffer com os primeiros 70 segundos (1min10s) do mix final.
+  const buildPreviewBuffer = (source) => {
+    const previewSeconds = 70;
+    const channels = source.numberOfChannels;
+    const sampleRate = source.sampleRate;
+    const maxLen = source.length;
+    const targetLen = Math.min(maxLen, Math.floor(previewSeconds * sampleRate));
+    if (targetLen >= maxLen) return source; // já é mais curto que a prévia
+    const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new Ctx(channels, targetLen, sampleRate);
+    for (let ch = 0; ch < channels; ch++) {
+      const src = ctx.createBuffer(channels, targetLen, sampleRate);
+      const data = source.getChannelData(ch).subarray(0, targetLen);
+      src.copyToChannel(data, ch, 0);
+    }
+    return ctx.buffer;
+  };
+
+  const doExportPreview = async (format) => {
+    if (!mixed) return;
+    setBusy(`preview-${format}`);
+    try {
+      const preview = buildPreviewBuffer(mixed);
+      let blob, name;
+      if (format === "wav") { blob = audioBufferToWavBlob(preview); name = "previa.wav"; }
+      else { blob = audioBufferToMp3Blob(preview, 192); name = "previa.mp3"; }
+      downloadBlob(blob, name);
+      setExportResult(`${name} pronto (${preview.duration.toFixed(1)}s)`);
+    } catch (e) {
+      setExportResult(e.message || "Erro ao exportar prévia.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
@@ -136,6 +171,21 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
               </Button>
               <Button size="lg" variant="outline" onClick={() => doExportPlayback("mp3")} disabled={!!busy || mixing} className="h-12 flex-1">
                 {busy === "playback-mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+                Baixar MP3
+              </Button>
+            </div>
+          </div>
+        )}
+        {mixed && (
+          <div>
+            <p className="mb-2 text-sm font-medium">Prévia (resultado final até 1min10s)</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button size="lg" variant="outline" onClick={() => doExportPreview("wav")} disabled={!!busy || mixing} className="h-12 flex-1">
+                {busy === "preview-wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+                Baixar WAV
+              </Button>
+              <Button size="lg" variant="outline" onClick={() => doExportPreview("mp3")} disabled={!!busy || mixing} className="h-12 flex-1">
+                {busy === "preview-mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
                 Baixar MP3
               </Button>
             </div>
