@@ -35,7 +35,7 @@ export default function VocalIsolator({ file, onIsolated, isolated }) {
     setMessage("Enviando para o kits.ai…");
     try {
       const buffer = await isolateVocal(file, (s) => {
-        if (s === "processing") setMessage("Isolando voz no kits.ai…");
+        if (s === "processing") setMessage("Isolando voz no kits.ai… (pode levar até 2 min se o limite de envio for atingido)");
         else if (s === "decoding") setMessage("Decodificando vocal isolado…");
       });
       onIsolated(buffer);

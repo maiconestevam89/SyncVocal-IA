@@ -13,6 +13,8 @@ import { secrets } from "base44:runtime";
 const KITS_BASE = "https://arpeggi.io/api/kits/v1";
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 180000; // 3 min ceiling for the separation job
+const RATE_LIMIT_WAIT_MS = 65000; // wait just over 1 min between 429 retries
+const MAX_CREATE_ATTEMPTS = 2; // retry once on rate-limit (first try + 1 retry)
 
 export default async function(req) {
   try {
@@ -44,13 +46,26 @@ export default async function(req) {
     const form = new FormData();
     form.append("inputFile", new Blob([fileBytes], { type: fileContentType }), filename);
 
-    // Create the separation job.
-    const createRes = await fetch(`${KITS_BASE}/vocal-separations`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: AbortSignal.timeout(60000),
-    });
+    // Create the separation job. Kits.ai allows 1 request per minute, so when
+    // the user uploads both audios back-to-back the second call hits a 429. We
+    // retry here automatically instead of failing, waiting ~1 min between tries.
+    let createRes;
+    let job;
+    let jobId;
+    for (let attempt = 1; attempt <= MAX_CREATE_ATTEMPTS; attempt++) {
+      createRes = await fetch(`${KITS_BASE}/vocal-separations`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (createRes.status === 429 && attempt < MAX_CREATE_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, RATE_LIMIT_WAIT_MS));
+        continue;
+      }
+      break;
+    }
 
     if (createRes.status === 429) {
       return Response.json(
@@ -67,8 +82,8 @@ export default async function(req) {
       );
     }
 
-    const job = await createRes.json();
-    const jobId = job?.id;
+    job = await createRes.json();
+    jobId = job?.id;
     if (!jobId) {
       return Response.json({ error: "Resposta do Kits sem id de job." }, { status: 502 });
     }
