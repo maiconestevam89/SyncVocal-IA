@@ -39,10 +39,10 @@ export default function EffectControls({ settings, onChange }) {
     <div className="space-y-6">
       {/* Voice isolation */}
       <div className="space-y-4">
-        <h4 className="text-sm font-semibold">Filtro de voz (aproximado)</h4>
+        <h4 className="text-sm font-semibold">Isolamento de voz</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Reduz graves, agudos e o que fica nas laterais do estéreo. Não separa instrumentos
-          que estão no centro junto com a voz — para isso é preciso um serviço de IA.
+          O filtro local é aproximado: não separa instrumentos que estão no centro junto com a
+          voz. Para uma separação real, use a IA (Demucs).
         </p>
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Ativar filtro</Label>

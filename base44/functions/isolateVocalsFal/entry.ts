@@ -38,6 +38,9 @@ export default async function (req) {
         }),
         signal: AbortSignal.timeout(20000),
       });
+      if (res.status === 401 || res.status === 403) {
+        return Response.json({ error: 'A chave do fal.ai (FAL_KEY) é inválida ou não tem permissão. Gere uma nova chave no painel do fal.ai e atualize o segredo.' }, { status: 502 });
+      }
       if (!res.ok) {
         const txt = await res.text();
         return Response.json({ error: `fal.ai recusou o envio (${res.status}): ${txt.slice(0, 300)}` }, { status: 502 });
