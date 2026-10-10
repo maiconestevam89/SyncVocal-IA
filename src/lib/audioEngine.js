@@ -40,15 +40,9 @@ const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 //   - If mono: apply a band-pass focused on the vocal range (200 Hz – 4 kHz)
 //     with a gentle high-pass below 120 Hz to cut bass/kick.
 // `strength` (0..1) blends between the isolated result and the original.
-//
-// `mode`:
-//   - "vocal"  : keep the vocal (center), cut instruments — for the user's vocal track.
-//   - "remove" : remove the vocal (center), keep instruments — for the reference track
-//                so only the instrumental bed remains under the user's voice.
-export async function isolateVocal(buffer, strength = 0.7, mode = "vocal") {
+export async function isolateVocal(buffer, strength = 0.7) {
   const s = clamp(strength, 0, 1);
   if (s <= 0) return buffer;
-  if (mode !== "vocal" && mode !== "remove") return buffer;
 
   const rate = buffer.sampleRate;
   const channels = buffer.numberOfChannels;
@@ -65,80 +59,31 @@ export async function isolateVocal(buffer, strength = 0.7, mode = "vocal") {
   const src = offline.createBufferSource();
   src.buffer = buffer;
 
-  // For "remove" mode we invert: build a mid/side split and keep the SIDE,
-  // i.e. subtract the center (vocal) from the signal. For mono there's no
-  // side, so we notch out the vocal presence band instead.
-  let midSideOffset = 0; // samples of delay between L and R to force center cancellation
-  let useSideChannel = false;
-  if (mode === "remove" && channels >= 2) {
-    useSideChannel = true;
-  }
-
   const outGain = offline.createGain();
   outGain.gain.value = 1;
 
-  if (mode === "remove" && channels >= 2) {
-    // Remove-center (stereo): L − R cancels anything panned dead center (the vocal).
-    const lGain = offline.createGain();
-    const rGain = offline.createGain();
-    rGain.gain.value = -1; // invert R
-    lGain.gain.value = 1;
-    const sum = offline.createGain();
-    sum.gain.value = 1;
+  // Keep center / vocal presence.
+  const hp = offline.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 120;
+  hp.Q.value = 0.7;
 
-    const splitter = offline.createChannelSplitter(2);
-    src.connect(splitter);
-    splitter.connect(lGain, 0);
-    splitter.connect(rGain, 1);
-    lGain.connect(sum);
-    rGain.connect(sum);
+  const bp = offline.createBiquadFilter();
+  bp.type = "peaking";
+  bp.frequency.value = 2200;
+  bp.Q.value = 0.8;
+  bp.gain.value = 2.5;
 
-    // Keep the side content musical: gentle low-pass.
-    const lp = offline.createBiquadFilter();
-    lp.type = "lowpass";
-    lp.frequency.value = 8000;
-    lp.Q.value = 0.5;
-    sum.connect(lp);
-    lp.connect(outGain);
-  } else if (mode === "remove") {
-    // Mono: no side channel to cancel the vocal. Notch the vocal presence
-    // band to attenuate the lead voice as much as a fixed filter can.
-    const notch = offline.createBiquadFilter();
-    notch.type = "peaking";
-    notch.frequency.value = 2000;
-    notch.Q.value = 1.5;
-    notch.gain.value = -18;
-    const hp = offline.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.value = 120;
-    hp.Q.value = 0.7;
-    src.connect(hp);
-    hp.connect(notch);
-    notch.connect(outGain);
-  } else {
-    // "vocal" mode: keep center / vocal presence.
-    const hp = offline.createBiquadFilter();
-    hp.type = "highpass";
-    hp.frequency.value = 120;
-    hp.Q.value = 0.7;
+  const cut = offline.createBiquadFilter();
+  cut.type = "peaking";
+  cut.frequency.value = 250;
+  cut.Q.value = 1.2;
+  cut.gain.value = -6;
 
-    const bp = offline.createBiquadFilter();
-    bp.type = "peaking";
-    bp.frequency.value = 2200;
-    bp.Q.value = 0.8;
-    bp.gain.value = 2.5;
-
-    const cut = offline.createBiquadFilter();
-    cut.type = "peaking";
-    cut.frequency.value = 250;
-    cut.Q.value = 1.2;
-    cut.gain.value = -6;
-
-    src.connect(hp);
-    hp.connect(cut);
-    cut.connect(bp);
-    bp.connect(outGain);
-  }
+  src.connect(hp);
+  hp.connect(cut);
+  cut.connect(bp);
+  bp.connect(outGain);
 
   outGain.connect(offline.destination);
   src.start(0);

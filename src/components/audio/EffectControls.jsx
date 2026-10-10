@@ -40,17 +40,10 @@ export default function EffectControls({ settings, onChange }) {
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Isolamento de voz</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Remove a voz da referência e isola a voz do seu vocal.
+          Remove instrumentos da faixa do vocal antes do resultado final.
         </p>
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Remover voz da referência</Label>
-          <Switch
-            checked={settings.removeRefVocal}
-            onCheckedChange={(v) => set({ removeRefVocal: v })}
-          />
-        </div>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Isolar voz do Áudio 2</Label>
+          <Label className="text-xs text-muted-foreground">Ativar isolamento</Label>
           <Switch
             checked={settings.isolate.enabled}
             onCheckedChange={(v) => setIsolate({ enabled: v })}
