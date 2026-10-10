@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Download, ExternalLink, Upload, Check, Info } from "lucide-react";
+import { Download, ExternalLink, Check, Info, Upload, FileAudio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 import { decodeAudioFile } from "@/lib/audioEngine";
@@ -9,10 +9,19 @@ import { decodeAudioFile } from "@/lib/audioEngine";
 // is returned to the parent via onRepaired, feeding the existing sync workflow.
 const KITS_REPAIR_URL = "https://app.kits.ai/ai-vocal-repair";
 
+const fmtSize = (bytes) => {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
+
 export default function ManualRepair({ buffer, onRepaired, repaired }) {
   const inputRef = useRef(null);
   const [error, setError] = useState("");
   const [fileName, setFileName] = useState("");
+  const [fileSize, setFileSize] = useState(0);
+  const [dragging, setDragging] = useState(false);
 
   const downloadIsolated = () => {
     const blob = audioBufferToWavBlob(buffer);
@@ -32,10 +41,18 @@ export default function ManualRepair({ buffer, onRepaired, repaired }) {
     try {
       const decoded = await decodeAudioFile(file);
       setFileName(file.name);
+      setFileSize(file.size);
       onRepaired(decoded);
     } catch {
       setError("Não foi possível ler o vocal reparado. Tente um WAV ou MP3.");
     }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleRepairedFile(f);
   };
 
   if (!buffer) return null;
@@ -91,20 +108,29 @@ export default function ManualRepair({ buffer, onRepaired, repaired }) {
           </Button>
         </div>
       ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors ${dragging ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/40"}`}
         >
-          <Upload className="mr-1.5 h-4 w-4" />
-          Enviar vocal reparado
-        </Button>
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Upload className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-medium">Enviar vocal reparado</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Arraste ou clique · MP3, WAV, M4A, OGG
+            </p>
+          </div>
+        </div>
       )}
 
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
 
       <input
         ref={inputRef}
