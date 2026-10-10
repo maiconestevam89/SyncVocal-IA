@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 
 const STEPS = [
   { key: "decode", label: "Carregando áudios" },
+  { key: "isolate", label: "Isolamento de voz" },
   { key: "sync", label: "Sincronização de tempo" },
   { key: "effects", label: "Aplicação de efeitos" },
   { key: "render", label: "Renderização final" },

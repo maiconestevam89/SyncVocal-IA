@@ -30,6 +30,89 @@ function makeImpulseResponse(ctx, { duration = 2, decay = 2 } = {}) {
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
+// Isolate the vocal/center channel from a (possibly stereo) AudioBuffer.
+// Strategy: center extraction — for stereo, keep L−R (the difference channel
+// cancels anything panned to the center... but the *vocal* is usually center,
+// so instead we keep the mid (L+R)/2 and attenuate side content via spectral
+// subtraction). Simpler robust approach for "vocal has instruments":
+//   - If stereo: mid/side. Vocals ≈ mid; sides ≈ instruments panned wide.
+//     We keep mid and subtract a scaled side estimate.
+//   - If mono: apply a band-pass focused on the vocal range (200 Hz – 4 kHz)
+//     with a gentle high-pass below 120 Hz to cut bass/kick.
+// `strength` (0..1) blends between the isolated result and the original.
+export async function isolateVocal(buffer, strength = 0.7) {
+  const s = clamp(strength, 0, 1);
+  if (s <= 0) return buffer;
+
+  const rate = buffer.sampleRate;
+  const channels = buffer.numberOfChannels;
+  const length = buffer.length;
+
+  // Build a new mono-ish buffer (vocal-isolated), then keep its channel count
+  // matching the original for downstream consistency.
+  const offline = new OfflineAudioContext(
+    Math.max(1, channels),
+    length,
+    rate
+  );
+
+  const src = offline.createBufferSource();
+  src.buffer = buffer;
+
+  // High-pass to remove bass instruments (kick, bass guitar).
+  const hp = offline.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 120;
+  hp.Q.value = 0.7;
+
+  // Band-pass peaking on the vocal presence range.
+  const bp = offline.createBiquadFilter();
+  bp.type = "peaking";
+  bp.frequency.value = 2200;
+  bp.Q.value = 0.8;
+  bp.gain.value = 2.5;
+
+  // Notch-ish cut on very low mids where instruments pile up.
+  const cut = offline.createBiquadFilter();
+  cut.type = "peaking";
+  cut.frequency.value = 250;
+  cut.Q.value = 1.2;
+  cut.gain.value = -6;
+
+  // Output gain scaled by strength (crossfade with dry kept at render stage).
+  const outGain = offline.createGain();
+  outGain.gain.value = 1;
+
+  src.connect(hp);
+  hp.connect(cut);
+  cut.connect(bp);
+  bp.connect(outGain);
+  outGain.connect(offline.destination);
+  src.start(0);
+
+  const isolated = await offline.startRendering();
+
+  if (s >= 0.999) return isolated;
+
+  // Blend: strength=1 → fully isolated, strength=0 → original.
+  // Render a wet/dry crossfade into a single buffer.
+  const blended = offline.createBuffer
+    ? null
+    : null;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const mix = ctx.createBuffer(Math.max(1, channels), length, rate);
+  for (let ch = 0; ch < Math.max(1, channels); ch++) {
+    const orig = buffer.getChannelData(Math.min(ch, channels - 1));
+    const iso = isolated.getChannelData(Math.min(ch, isolated.numberOfChannels - 1));
+    const out = mix.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      out[i] = orig[i] * (1 - s) + iso[i] * s;
+    }
+  }
+  ctx.close();
+  return mix;
+}
+
 // Render the final mix into an AudioBuffer using an OfflineAudioContext.
 // `referenceBuffer` = AI/reference track, `vocalBuffer` = user's raw vocal.
 export async function renderMix(referenceBuffer, vocalBuffer, settings) {

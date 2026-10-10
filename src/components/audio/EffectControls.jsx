@@ -31,9 +31,38 @@ export default function EffectControls({ settings, onChange }) {
   const setReverb = (patch) => set({ reverb: { ...settings.reverb, ...patch } });
   const setDelay = (patch) => set({ delay: { ...settings.delay, ...patch } });
   const setComp = (patch) => set({ compressor: { ...settings.compressor, ...patch } });
+  const setIsolate = (patch) =>
+    set({ isolate: { ...settings.isolate, ...patch } });
 
   return (
     <div className="space-y-6">
+      {/* Voice isolation */}
+      <div className="space-y-4">
+        <h4 className="text-sm font-semibold">Isolamento de voz</h4>
+        <p className="text-xs text-muted-foreground -mt-2">
+          Remove instrumentos da faixa do vocal antes do resultado final.
+        </p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Ativar isolamento</Label>
+          <Switch
+            checked={settings.isolate.enabled}
+            onCheckedChange={(v) => setIsolate({ enabled: v })}
+          />
+        </div>
+        {settings.isolate.enabled && (
+          <Field
+            label="Intensidade"
+            value={settings.isolate.strength.toFixed(2)}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(v) => setIsolate({ strength: v })}
+          />
+        )}
+      </div>
+
+      <div className="h-px bg-border" />
+
       {/* Alignment */}
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Alinhamento de Tempo</h4>

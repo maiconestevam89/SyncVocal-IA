@@ -6,12 +6,13 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
-import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
+import { decodeAudioFile, renderMix, isolateVocal } from "@/lib/audioEngine";
 
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
   offsetSec: 0,
   preservePitch: true,
+  isolate: { enabled: false, strength: 0.7 },
   mix: { reference: 0.8, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
   reverb: { amount: 0.25, duration: 2, decay: 2 },
@@ -67,12 +68,20 @@ export default function Studio() {
     try {
       setActiveStep("decode");
       await new Promise((r) => setTimeout(r, 500));
+
+      // Optional vocal isolation on the vocal track (Áudio 2) before mix.
+      let vocalForMix = buffer2;
+      if (settings.isolate?.enabled) {
+        setActiveStep("isolate");
+        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength);
+      }
+
       setActiveStep("sync");
       await new Promise((r) => setTimeout(r, 600));
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 600));
       setActiveStep("render");
-      const rendered = await renderMix(buffer1, buffer2, settings);
+      const rendered = await renderMix(buffer1, vocalForMix, settings);
       setRendered(rendered);
       setStage("result");
     } catch (e) {
