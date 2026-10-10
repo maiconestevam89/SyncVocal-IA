@@ -65,9 +65,14 @@ export default async function(req) {
 
     if (!createRes.ok) {
       const detail = await createRes.text().catch(() => "");
+      // On 422 the body usually carries the exact validation message, which is
+      // the single most useful thing to surface back to the app.
       return Response.json(
-        { error: `Kits (criar repair): ${createRes.status}`, detail },
-        { status: 502 }
+        {
+          error: `Kits (criar repair): ${createRes.status}`,
+          detail: detail || null,
+        },
+        { status: createRes.status === 422 ? 422 : 502 }
       );
     }
 
