@@ -3,23 +3,9 @@ import { computeSilenceGate, GATE_RATE } from "@/lib/dsp/silenceGate";
 // Decodes uploaded files, renders a time-aligned + effected mix offline.
 
 // Decode an uploaded audio File into an AudioBuffer.
-// Some browsers reject certain containers (m4a/ogg) on the first attempt;
-// retry once with a re-read buffer before giving up.
-export async function decodeAudioFile(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
-  try {
-    try {
-      return await ctx.decodeAudioData(arrayBuffer.slice(0));
-    } catch (firstErr) {
-      const retry = await file.arrayBuffer();
-      return await ctx.decodeAudioData(retry.slice(0));
-    }
-  } finally {
-    ctx.close();
-  }
-}
+// Re-exported from the dedicated decode module, which falls back to the
+// browser's media-element pipeline for MP3s that decodeAudioData() rejects.
+export { decodeAudioFile } from "@/lib/decodeAudio";
 
 // Build a synthetic impulse response for the convolver (reverb).
 function makeImpulseResponse(ctx, { duration = 2, decay = 2 } = {}) {
