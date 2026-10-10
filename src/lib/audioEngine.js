@@ -1,30 +1,46 @@
+import { base44 } from "@/api/base44Client";
 import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 // Client-side audio engine using the Web Audio API.
 // Decodes uploaded files, renders a time-aligned + effected mix offline.
 
-// Isolate the vocal from an AudioBuffer by sending it to Demucs on fal.ai.
-// The base64 audio round-trips through a backend function that holds the API
-// key server-side; nothing secret ever reaches the browser.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Call the fal.ai backend function and surface its real error message.
+async function callFal(payload) {
+  try {
+    const res = await base44.functions.invoke("isolateVocalsFal", payload);
+    return res.data;
+  } catch (e) {
+    throw new Error(e?.response?.data?.error || e.message);
+  }
+}
+
+// Isolate the vocal from an AudioBuffer with Demucs on fal.ai.
+// 1) upload the audio privately and get a short-lived link,
+// 2) the backend function starts the job (API key stays on the server),
+// 3) poll until the separated vocal is ready, then download and decode it.
 export async function isolateVocalFal(buffer) {
-  const blob = audioBufferToWavBlob(buffer);
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  const audio_base64 = btoa(binary);
-
-  const base44 = (await import("@/api/base44Client")).base44;
-  const res = await base44.functions.invoke("isolateVocalsFal", {
-    audio_base64,
-    mime: "audio/wav",
+  const file = new File([audioBufferToWavBlob(buffer)], "vocal.wav", { type: "audio/wav" });
+  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+  const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({
+    file_uri,
+    expires_in: 1800,
   });
-  const data = res?.data;
-  if (!data || !data.audio_base64) throw new Error(data?.error || "fal.ai não retornou o stem");
 
-  const b64 = data.audio_base64;
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return decodeAudioFile(new File([out], "vocals.wav", { type: "audio/wav" }));
+  const { request_id } = await callFal({ action: "start", audio_url: signed_url });
+
+  let vocalsUrl = null;
+  for (let i = 0; i < 200 && !vocalsUrl; i++) {
+    await sleep(3000);
+    const st = await callFal({ action: "poll", request_id });
+    if (st.status === "COMPLETED") vocalsUrl = st.vocals_url;
+  }
+  if (!vocalsUrl) throw new Error("Tempo esgotado aguardando a separação de voz");
+
+  const dl = await fetch(vocalsUrl);
+  if (!dl.ok) throw new Error("Não foi possível baixar a voz separada");
+  const blob = await dl.blob();
+  return decodeAudioFile(new File([blob], "vocals.mp3", { type: "audio/mpeg" }));
 }
 
 // Decode an uploaded audio File into an AudioBuffer.
