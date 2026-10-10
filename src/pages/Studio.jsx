@@ -128,10 +128,15 @@ export default function Studio() {
     setStage("upload");
     setRendered(null);
     setSettings(DEFAULT_SETTINGS);
+    setFile1(null);
+    setFile2(null);
+    setBuffer1(null);
+    setBuffer2(null);
     setIsolatedBuffer1(null);
     setInstrumentalBuffer1(null);
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
+    setError(null);
   };
 
   // Ready when the isolated reference AND the real instrumental are available
