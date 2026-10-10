@@ -17,7 +17,7 @@ const DEFAULT_SETTINGS = {
   autoAlign: true,
   autoSync: true,
   preservePitch: true,
-  mix: { reference: 0, vocal: 1 },
+  mix: { reference: 0.7, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
   reverb: { amount: 0, duration: 2, decay: 2 },
   delay: { time: 0.25, feedback: 0.3, amount: 0 },
@@ -29,6 +29,7 @@ export default function Studio() {
   const [file2, setFile2] = useState(null);
   const [buffer1, setBuffer1] = useState(null);
   const [buffer2, setBuffer2] = useState(null);
+  const [isolatedBuffer1, setIsolatedBuffer1] = useState(null);
   const [isolatedBuffer2, setIsolatedBuffer2] = useState(null);
   const [repairedBuffer2, setRepairedBuffer2] = useState(null);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -62,6 +63,10 @@ export default function Studio() {
 
   // Reset the isolated vocal whenever the uploaded file changes.
   useEffect(() => {
+    setIsolatedBuffer1(null);
+  }, [file1]);
+
+  useEffect(() => {
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
   }, [file2]);
@@ -73,15 +78,20 @@ export default function Studio() {
 
   const autoSync = () => {
     const vocal = repairedBuffer2 || isolatedBuffer2 || buffer2;
-    if (!buffer1 || !vocal) return;
-    const ratio = vocal.duration / buffer1.duration;
+    const reference = isolatedBuffer1 || buffer1;
+    if (!reference || !vocal) return;
+    const ratio = vocal.duration / reference.duration;
     const clamped = Math.max(0.5, Math.min(2, ratio));
     setSettings((s) => ({ ...s, tempoRatio: clamped, autoSync: false }));
   };
 
   const process = async () => {
     const vocal = repairedBuffer2 || isolatedBuffer2 || buffer2;
-    if (!buffer1 || !vocal) return;
+    // Use the isolated vocal from Audio 1 as the sync reference; fall back
+    // to the raw Audio 1 if isolation hasn't completed (user may have uploaded
+    // an already-isolated vocal).
+    const reference = isolatedBuffer1 || buffer1;
+    if (!reference || !vocal) return;
     setError(null);
     setStage("processing");
     try {
@@ -89,11 +99,14 @@ export default function Studio() {
       await new Promise((r) => setTimeout(r, 500));
 
       setActiveStep("sync");
-      const aligned = await alignVocal(buffer1, vocal, settings);
+      const aligned = await alignVocal(reference, vocal, settings);
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
-      const rendered = await renderMix(buffer1, aligned.buffer, settings, aligned);
+      const rendered = await renderMix(reference, aligned.buffer, settings, {
+        ...aligned,
+        instrumentalBuffer: buffer1,
+      });
       setRendered(rendered);
       setStage("result");
     } catch (e) {
@@ -108,10 +121,12 @@ export default function Studio() {
     setStage("upload");
     setRendered(null);
     setSettings(DEFAULT_SETTINGS);
+    setIsolatedBuffer1(null);
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
   };
 
+  // Ready when Audio 1 is decoded (and optionally isolated) and a vocal is available.
   const ready = buffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
 
   // The vocal that's currently "active" for preview / processing.
@@ -141,7 +156,11 @@ export default function Studio() {
 
       <main className="mx-auto max-w-6xl px-4 py-8">
         {stage === "result" ? (
-          <MixEditor initialBuffer={rendered} initialLabel="Vocal sincronizado" />
+          <MixEditor
+            initialBuffer={rendered}
+            initialLabel="Voz sincronizada"
+            instrumentalBuffer={buffer1}
+          />
         ) : (
           <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
             {/* Left: upload + preview */}
@@ -151,16 +170,16 @@ export default function Studio() {
                   Sincronize seu vocal com uma referência de IA
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Envie a voz da IA (Áudio 1) e a sua voz humana (Áudio 2). Você pode isolar o
-                  vocal do Áudio 2 com o kits.ai antes de sincronizar — sua voz passa a seguir o
-                  andamento, os silêncios e a duração do Áudio 1. O processamento final roda no
-                  navegador, sem custo de API por sincronização.
+                  Envie a faixa completa (voz + instrumental) no Áudio 1 e a sua voz humana no
+                  Áudio 2. O kits.ai isola automaticamente a voz de ambos — a voz isolada do
+                  Áudio 1 vira a referência de sincronização. O resultado final junta a sua
+                  voz sincronizada com o instrumental original do Áudio 1 em um único áudio.
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <UploadZone
-                  label="Áudio 1 — Voz da IA (isolada)"
+                  label="Áudio 1 — Voz + Instrumental"
                   hint="Arraste ou clique · MP3, WAV, M4A, OGG"
                   file={file1}
                   onFile={setFile1}
@@ -173,9 +192,21 @@ export default function Studio() {
                 />
               </div>
 
+              {file1 && (
+                <div className="space-y-3">
+                  <VocalIsolator
+                    file={file1}
+                    isolated={isolatedBuffer1}
+                    onIsolated={setIsolatedBuffer1}
+                  />
+                </div>
+              )}
               {buffer1 && (
                 <div className="rounded-2xl border bg-card p-5">
-                  <WaveformPlayer buffer={buffer1} label="Referência" />
+                  <WaveformPlayer
+                    buffer={isolatedBuffer1 || buffer1}
+                    label={isolatedBuffer1 ? "Voz isolada do Áudio 1 (referência)" : "Áudio 1 (aguardando isolamento)"}
+                  />
                 </div>
               )}
               {file2 && (
@@ -228,6 +259,7 @@ export default function Studio() {
                   onClick={autoSync}
                   disabled={!buffer1 || !buffer2}
                   className="h-14"
+                  title="Igualar a duração da voz à referência"
                 >
                   <Clock className="mr-2 h-5 w-5" />
                   Sincronizar duração

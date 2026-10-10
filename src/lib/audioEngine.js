@@ -51,7 +51,7 @@ export async function renderMix(
   referenceBuffer,
   vocalBuffer,
   settings,
-  { playbackRate = 1, startAt = 0 } = {}
+  { playbackRate = 1, startAt = 0, instrumentalBuffer = null } = {}
 ) {
   const {
     mix = { reference: 0, vocal: 1 },
@@ -62,18 +62,37 @@ export async function renderMix(
   } = settings;
 
   // The vocal arrives already placed on the reference's timeline (see align.js).
+  // Use the LONGEST buffer as the output length: the instrumental (original
+  // Audio 1) is typically the full track, while the isolated vocal reference
+  // may be slightly shorter/longer due to the separation process.
   const sampleRate = referenceBuffer.sampleRate;
-  const length = Math.ceil(referenceBuffer.duration * sampleRate);
+  const refDur = referenceBuffer.duration;
+  const instDur = instrumentalBuffer ? instrumentalBuffer.duration : 0;
+  const outDuration = Math.max(refDur, instDur);
+  const length = Math.ceil(outDuration * sampleRate);
 
   const offline = new OfflineAudioContext(2, length, sampleRate);
 
   // --- Reference track (straight through, level only) ---
+  // The reference is the isolated vocal from Audio 1 — used for alignment
+  // and silence gating, but NOT included in the output (mix.reference = 0).
   const refSrc = offline.createBufferSource();
   refSrc.buffer = referenceBuffer;
   const refGain = offline.createGain();
-  refGain.gain.value = clamp(mix.reference, 0, 1.5);
+  refGain.gain.value = 0; // isolated reference is for timing only, not output
   refSrc.connect(refGain).connect(offline.destination);
   refSrc.start(0);
+
+  // --- Instrumental track (original Audio 1 with vocal removed via gain=0
+  //     on the reference, but we need the FULL original mix here) ---
+  if (instrumentalBuffer) {
+    const instSrc = offline.createBufferSource();
+    instSrc.buffer = instrumentalBuffer;
+    const instGain = offline.createGain();
+    instGain.gain.value = clamp(mix.reference, 0, 1.5);
+    instSrc.connect(instGain).connect(offline.destination);
+    instSrc.start(0);
+  }
 
   // --- Vocal track: time-stretch + effects chain ---
   const vocalSrc = offline.createBufferSource();

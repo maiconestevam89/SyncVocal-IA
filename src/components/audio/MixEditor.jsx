@@ -104,12 +104,35 @@ function usePlayback(tracks) {
   return { playing, progress, duration, toggle, stop, maxDur };
 }
 
-export default function MixEditor({ initialBuffer, initialLabel }) {
-  const [tracks, setTracks] = useState(
-    initialBuffer
-      ? [{ id: "sync", name: initialLabel || "Vocal sincronizado", buffer: initialBuffer, gain: 1, pan: 0, muted: false, solo: false, startAt: 0 }]
-      : []
-  );
+export default function MixEditor({ initialBuffer, initialLabel, instrumentalBuffer }) {
+  const [tracks, setTracks] = useState(() => {
+    const initial = [];
+    if (initialBuffer) {
+      initial.push({
+        id: "sync",
+        name: initialLabel || "Voz sincronizada",
+        buffer: initialBuffer,
+        gain: 1,
+        pan: 0,
+        muted: false,
+        solo: false,
+        startAt: 0,
+      });
+    }
+    if (instrumentalBuffer) {
+      initial.push({
+        id: "instrumental",
+        name: "Instrumental original",
+        buffer: instrumentalBuffer,
+        gain: 0.8,
+        pan: 0,
+        muted: false,
+        solo: false,
+        startAt: 0,
+      });
+    }
+    return initial;
+  });
   const [busy, setBusy] = useState(null);
   const [exportResult, setExportResult] = useState(null);
   const fileInputRef = useRef(null);
@@ -178,8 +201,8 @@ export default function MixEditor({ initialBuffer, initialLabel }) {
         <div>
           <h2 className="font-heading text-2xl font-semibold tracking-tight">Editor de Mixagem</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            O vocal sincronizado já está na primeira pista. Adicione mais pistas, ajuste volume e
-            paneamento, e exporte a mixagem final.
+            A sua voz sincronizada e o instrumental original já estão nas pistas. Ajuste volume,
+            paneamento e mute/solo, e exporte a mixagem final em um único áudio.
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
