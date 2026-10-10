@@ -3,7 +3,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
-function Field({ label, value, suffix, min, max, step, onChange }) {
+function Field({ label, value, suffix, min, max, step, onChange, disabled }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
@@ -18,6 +18,7 @@ function Field({ label, value, suffix, min, max, step, onChange }) {
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
         onValueChange={([v]) => onChange(v)}
       />
     </div>
@@ -38,13 +39,13 @@ export default function EffectControls({ settings, onChange }) {
     <div className="space-y-6">
       {/* Voice isolation */}
       <div className="space-y-4">
-        <h4 className="text-sm font-semibold">Isolamento de voz</h4>
+        <h4 className="text-sm font-semibold">Filtro de voz (aproximado)</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Mantém somente a faixa de voz do Áudio 2, removendo instrumentos da mixagem.
-          Processado no navegador, instantâneo.
+          Reduz graves, agudos e o que fica nas laterais do estéreo. Não separa instrumentos
+          que estão no centro junto com a voz — para isso é preciso um serviço de IA.
         </p>
         <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Ativar isolamento</Label>
+          <Label className="text-xs text-muted-foreground">Ativar filtro</Label>
           <Switch
             checked={settings.isolate.enabled}
             onCheckedChange={(v) => setIsolate({ enabled: v })}
@@ -58,15 +59,21 @@ export default function EffectControls({ settings, onChange }) {
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Alinhamento de Tempo</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          O vocal começa automaticamente quando a referência inicia — respeitando o silêncio inicial.
+          Acompanha a melodia e o ritmo do Áudio 1 frase por frase, esticando ou
+          encurtando o Áudio 2 sem mudar o tom da voz.
         </p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs text-muted-foreground">Sincronizar automaticamente</Label>
+          <Switch checked={settings.autoSync} onCheckedChange={(v) => set({ autoSync: v })} />
+        </div>
         <Field
-          label="Andamento (tempo)"
+          label="Andamento manual (tempo)"
           value={settings.tempoRatio.toFixed(2)}
           suffix="x"
           min={0.5}
           max={2}
           step={0.01}
+          disabled={settings.autoSync}
           onChange={(v) => set({ tempoRatio: v })}
         />
         <div className="flex items-center justify-between">

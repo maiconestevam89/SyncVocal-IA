@@ -7,11 +7,13 @@ import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
 import { decodeAudioFile, renderMix, isolateVocal } from "@/lib/audioEngine";
+import { alignVocal } from "@/lib/align";
 
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
   offsetSec: 0,
   autoAlign: true,
+  autoSync: true,
   preservePitch: true,
   isolate: { enabled: false, strength: 0.7 },
   mix: { reference: 0.8, vocal: 1 },
@@ -59,7 +61,7 @@ export default function Studio() {
     if (!buffer1 || !buffer2) return;
     const ratio = buffer2.duration / buffer1.duration;
     const clamped = Math.max(0.5, Math.min(2, ratio));
-    setSettings((s) => ({ ...s, tempoRatio: clamped }));
+    setSettings((s) => ({ ...s, tempoRatio: clamped, autoSync: false }));
   };
 
   const process = async () => {
@@ -78,15 +80,15 @@ export default function Studio() {
       }
 
       setActiveStep("sync");
-      await new Promise((r) => setTimeout(r, 600));
+      const aligned = await alignVocal(buffer1, vocalForMix, settings);
       setActiveStep("effects");
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
-      const rendered = await renderMix(buffer1, vocalForMix, settings);
+      const rendered = await renderMix(buffer1, aligned.buffer, settings, aligned);
       setRendered(rendered);
       setStage("result");
     } catch (e) {
-      setError("Falha ao processar o áudio. Tente arquivos menores.");
+      setError(`Falha ao processar o áudio: ${e.message}`);
       setStage("upload");
     } finally {
       setActiveStep(null);

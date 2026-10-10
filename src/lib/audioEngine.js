@@ -166,12 +166,13 @@ export function detectAudioStart(buffer, { threshold = 0.02, windowMs = 30 } = {
 
 // Render the final mix into an AudioBuffer using an OfflineAudioContext.
 // `referenceBuffer` = AI/reference track, `vocalBuffer` = user's raw vocal.
-export async function renderMix(referenceBuffer, vocalBuffer, settings) {
+export async function renderMix(
+  referenceBuffer,
+  vocalBuffer,
+  settings,
+  { playbackRate = 1, startAt = 0 } = {}
+) {
   const {
-    tempoRatio = 1,
-    offsetSec = 0,
-    autoAlign = true,
-    preservePitch = true,
     mix = { reference: 0.8, vocal: 1 },
     eq = {},
     reverb = {},
@@ -179,15 +180,11 @@ export async function renderMix(referenceBuffer, vocalBuffer, settings) {
     compressor = {},
   } = settings;
 
-  const ratio = clamp(tempoRatio, 0.5, 2);
-  // When auto-align is on, the vocal waits for the reference's first non-silent
-  // onset so the singer enters exactly when the backing track starts.
-  const refStart = autoAlign ? detectAudioStart(referenceBuffer) : 0;
-  const offset = clamp(Math.max(refStart, offsetSec), 0, 8);
+  // The vocal arrives already placed on the reference's timeline (see align.js).
   const sampleRate = referenceBuffer.sampleRate;
   const refDur = referenceBuffer.duration;
-  const vocalDur = vocalBuffer.duration / ratio;
-  const duration = Math.max(refDur, vocalDur + Math.max(0, offset)) + 0.5;
+  const vocalDur = vocalBuffer.duration / playbackRate;
+  const duration = Math.max(refDur, vocalDur + startAt) + 0.5;
   const length = Math.ceil(duration * sampleRate);
 
   const offline = new OfflineAudioContext(2, length, sampleRate);
@@ -203,11 +200,7 @@ export async function renderMix(referenceBuffer, vocalBuffer, settings) {
   // --- Vocal track: time-stretch + effects chain ---
   const vocalSrc = offline.createBufferSource();
   vocalSrc.buffer = vocalBuffer;
-  vocalSrc.playbackRate.value = ratio;
-  if (preservePitch) {
-    // Compensate the pitch shift caused by playbackRate (cheap time-stretch).
-    vocalSrc.detune.value = -1200 * Math.log2(ratio);
-  }
+  vocalSrc.playbackRate.value = playbackRate;
 
   // EQ: low shelf, peaking mid, high shelf
   const low = offline.createBiquadFilter();
@@ -274,7 +267,7 @@ export async function renderMix(referenceBuffer, vocalBuffer, settings) {
   delayNode.connect(delayGain);
   delayGain.connect(offline.destination);
 
-  vocalSrc.start(Math.max(0, offset));
+  vocalSrc.start(Math.max(0, startAt));
 
   return offline.startRendering();
 }
