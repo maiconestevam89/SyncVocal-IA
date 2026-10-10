@@ -166,7 +166,7 @@ export default function Studio() {
                   onFile={setFile1}
                 />
                 <UploadZone
-                  label="Áudio 2 — Voz humana (isolada)"
+                  label="Áudio 2 — Voz cliente"
                   hint="Arraste ou clique · MP3, WAV, M4A, OGG"
                   file={file2}
                   onFile={setFile2}
