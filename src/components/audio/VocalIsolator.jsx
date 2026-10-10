@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Sparkles, Loader2, Check, AlertCircle } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { base44 } from "@/api/base44Client";
 
@@ -56,6 +56,12 @@ export default function VocalIsolator({ file, onIsolated, isolated }) {
     }
   };
 
+  // Run isolation automatically when a new file arrives.
+  useEffect(() => {
+    if (file && !isolated) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file]);
+
   if (!file) return null;
 
   if (isolated) {
@@ -70,29 +76,28 @@ export default function VocalIsolator({ file, onIsolated, isolated }) {
     );
   }
 
-  return (
-    <div className="space-y-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={run}
-        disabled={status === "working"}
-        className="w-full"
-      >
-        {status === "working" ? (
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <Sparkles className="mr-2 h-4 w-4" />
-        )}
-        {status === "working" ? "Isolando voz…" : "Isolar voz com kits.ai"}
-      </Button>
-      {status === "error" && (
+  if (status === "working") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+        <span className="truncate">{message || "Isolando voz…"}</span>
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="space-y-2">
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{message}</span>
+          <span className="flex-1">{message}</span>
+          <Button variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs" onClick={run}>
+            Tentar novamente
+          </Button>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    );
+  }
+
+  return null;
 }
