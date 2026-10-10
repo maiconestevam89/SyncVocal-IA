@@ -40,7 +40,8 @@ export default function EffectControls({ settings, onChange }) {
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Isolamento de voz</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Remove instrumentos da faixa do vocal antes do resultado final.
+          Usa IA (Demucs) para separar e manter somente a voz do Áudio 2, removendo
+          instrumentos da mixagem. Processamento na nuvem, pode levar cerca de um minuto.
         </p>
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Ativar isolamento</Label>
@@ -49,16 +50,6 @@ export default function EffectControls({ settings, onChange }) {
             onCheckedChange={(v) => setIsolate({ enabled: v })}
           />
         </div>
-        {settings.isolate.enabled && (
-          <Field
-            label="Intensidade"
-            value={settings.isolate.strength.toFixed(2)}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={(v) => setIsolate({ strength: v })}
-          />
-        )}
       </div>
 
       <div className="h-px bg-border" />

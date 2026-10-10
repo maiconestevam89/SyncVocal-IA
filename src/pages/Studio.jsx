@@ -6,7 +6,8 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
-import { decodeAudioFile, renderMix, isolateVocal } from "@/lib/audioEngine";
+import { decodeAudioFile, renderMix, isolateVocalWithAI } from "@/lib/audioEngine";
+import { base44 } from "@/api/base44Client";
 
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
@@ -70,11 +71,16 @@ export default function Studio() {
       setActiveStep("decode");
       await new Promise((r) => setTimeout(r, 500));
 
-      // Optional vocal isolation on the vocal track (Áudio 2) before mix.
+      // Optional AI vocal isolation on the vocal track (Áudio 2) before mix.
       let vocalForMix = buffer2;
       if (settings.isolate?.enabled) {
         setActiveStep("isolate");
-        vocalForMix = await isolateVocal(buffer2, settings.isolate.strength);
+        vocalForMix = await isolateVocalWithAI(file2, {
+          onPoll: (status, attempt) => {
+            // keep the overlay on the isolate step while polling
+            setActiveStep("isolate");
+          },
+        });
       }
 
       setActiveStep("sync");

@@ -30,119 +30,58 @@ function makeImpulseResponse(ctx, { duration = 2, decay = 2 } = {}) {
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-// Isolate the vocal from a (possibly stereo) AudioBuffer.
-//
-// Strategy:
-//   1. Center extraction (mid/side). For stereo input we compute
-//        mid  = (L + R) / 2
-//        side = (L - R) / 2
-//      The lead vocal is usually panned dead center, so it lives almost
-//      entirely in `mid`, while widely-panned instruments (guitars, keys,
-//      cymbals, stereo reverb) live in `side`. We KEEP `mid` and attenuate
-//      `side` — the opposite of karaoke-style cancellation — so the vocal
-//      survives and the hard-panned instruments drop out.
-//      For mono input there is no side channel, so we fall back to a vocal-
-//      band filter chain.
-//   2. Vocal-band EQ: high-pass ~120 Hz to cut bass/kick, low-pass ~8 kHz to
-//      cut cymbals/air, gentle presence boost around 2–3 kHz where the voice
-//      sits. This shaves off centered instruments (kick, snare, bass) that
-//      survived the mid/side step because they were also panned center.
-//   3. `strength` (0..1) crossfades between the original and the isolated
-//      result, so the user can dial in how aggressive the isolation is.
-export async function isolateVocal(buffer, strength = 0.7) {
-  const s = clamp(strength, 0, 1);
-  if (s <= 0) return buffer;
+// Run AI vocal isolation (Demucs via Replicate) on an uploaded File.
+// Uploads the file to private storage, starts a prediction, polls until it
+// finishes, then fetches and decodes the returned vocals stem.
+export async function isolateVocalWithAI(file, { onPoll } = {}) {
+  const { base44 } = await import("@/api/base44Client");
 
-  const rate = buffer.sampleRate;
-  const channels = buffer.numberOfChannels;
-  const length = buffer.length;
+  // 1. Upload the raw vocal file to private storage.
+  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({
+    file,
+  });
 
-  // Step 1 — center extraction into a mono buffer.
-  let center;
-  if (channels >= 2) {
-    const L = buffer.getChannelData(0);
-    const R = buffer.getChannelData(1);
-    center = new Float32Array(length);
-    for (let i = 0; i < length; i++) {
-      // Keep mid, suppress side. strength scales how much side we remove.
-      center[i] = (L[i] + R[i]) * 0.5 - (L[i] - R[i]) * 0.5 * s;
+  // 2. Start the Demucs prediction.
+  const startRes = await base44.functions.invoke("isolateVocalsStart", {
+    file_uri,
+  });
+  const predictionId = startRes.data?.prediction_id;
+  if (!predictionId) {
+    throw new Error(startRes.data?.error || "Não foi possível iniciar o isolamento.");
+  }
+
+  // 3. Poll until the prediction finishes (Demucs takes ~30–90s).
+  let vocalsUrl = null;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const pollRes = await base44.functions.invoke("isolateVocalsPoll", {
+      prediction_id: predictionId,
+    });
+    const data = pollRes.data || {};
+    if (onPoll) onPoll(data.status, attempt);
+    if (data.status === "succeeded") {
+      vocalsUrl = data.vocals_url;
+      break;
     }
-  } else {
-    center = buffer.getChannelData(0).slice();
-  }
-
-  // Wrap `center` in an AudioBuffer and run the vocal-band EQ offline.
-  const offline = new OfflineAudioContext(1, length, rate);
-  const centerBuffer = offline.createBuffer(1, length, rate);
-  centerBuffer.copyToChannel(center, 0);
-
-  const src = offline.createBufferSource();
-  src.buffer = centerBuffer;
-
-  // High-pass: cut bass / kick / rumble.
-  const hp = offline.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.value = 120;
-  hp.Q.value = 0.7;
-
-  // Low-pass: cut cymbals, hi-hats, air.
-  const lp = offline.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 8000;
-  lp.Q.value = 0.7;
-
-  // Notch out a bit of the snare/body region that centered instruments share.
-  const notch = offline.createBiquadFilter();
-  notch.type = "peaking";
-  notch.frequency.value = 200;
-  notch.Q.value = 1.0;
-  notch.gain.value = -4 * s;
-
-  // Presence boost where the voice is most intelligible.
-  const presence = offline.createBiquadFilter();
-  presence.type = "peaking";
-  presence.frequency.value = 2800;
-  presence.Q.value = 0.9;
-  presence.gain.value = 2.5;
-
-  src.connect(hp);
-  hp.connect(lp);
-  lp.connect(notch);
-  notch.connect(presence);
-  presence.connect(offline.destination);
-  src.start(0);
-
-  const isolated = await offline.startRendering();
-
-  if (s >= 0.999) {
-    // Up-mix back to the original channel count for downstream consistency.
-    return upmixToChannels(isolated, channels, rate);
-  }
-
-  // Blend wet/dry.
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const outChannels = Math.max(1, channels);
-  const mix = ctx.createBuffer(outChannels, length, rate);
-  const isoData = isolated.getChannelData(0);
-  for (let ch = 0; ch < outChannels; ch++) {
-    const orig = buffer.getChannelData(Math.min(ch, channels - 1));
-    const out = mix.getChannelData(ch);
-    for (let i = 0; i < length; i++) {
-      out[i] = orig[i] * (1 - s) + isoData[i] * s;
+    if (data.status === "failed" || data.error) {
+      throw new Error(data.error || "O isolamento falhou no servidor.");
     }
   }
-  ctx.close();
-  return mix;
-}
+  if (!vocalsUrl) {
+    throw new Error("O isolamento demorou demais. Tente novamente.");
+  }
 
-function upmixToChannels(monoBuffer, channels, rate) {
-  if (channels <= 1) return monoBuffer;
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const out = ctx.createBuffer(channels, monoBuffer.length, rate);
-  const data = monoBuffer.getChannelData(0);
-  for (let ch = 0; ch < channels; ch++) out.copyToChannel(data, ch);
-  ctx.close();
-  return out;
+  // 4. Fetch the isolated vocals MP3 and decode it.
+  const resp = await fetch(vocalsUrl);
+  if (!resp.ok) throw new Error("Não foi possível baixar a voz isolada.");
+  const arrayBuffer = await resp.arrayBuffer();
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx();
+  try {
+    return await ctx.decodeAudioData(arrayBuffer.slice(0));
+  } finally {
+    ctx.close();
+  }
 }
 
 // Detect the first non-silent sample of a buffer (in seconds).
