@@ -17,8 +17,8 @@ const DEFAULT_SETTINGS = {
   preservePitch: true,
   mix: { reference: 0, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
-  reverb: { amount: 0.25, duration: 2, decay: 2 },
-  delay: { time: 0.25, feedback: 0.3, amount: 0.15 },
+  reverb: { amount: 0, duration: 2, decay: 2 },
+  delay: { time: 0.25, feedback: 0.3, amount: 0 },
   compressor: { threshold: -24, knee: 30, ratio: 4, attack: 0.003, release: 0.25 },
 };
 
