@@ -9,7 +9,7 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 
 // Renders the final mix automatically (vocal + instrumental with matched
 // volumes) and exposes only a player + download buttons. No manual mixing.
-export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }) {
+export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceName, onReset }) {
   const [mixed, setMixed] = useState(null);
   const [mixing, setMixing] = useState(true);
   const [busy, setBusy] = useState(null);
@@ -50,13 +50,22 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  // Deriva os nomes de arquivo a partir do nome do Áudio 1.
+  // - Resultado final: mantém o nome original (sem extensão) + nova extensão.
+  // - Playback: substitui caracteres não numéricos por "- PLAYBACK".
+  // - Prévia: mesmo do playback, mas com "PRÉVIA".
+  const baseName = (sourceName || "syncvocal").replace(/\.[^.]+$/, "");
+  const digitsOnly = baseName.replace(/[^0-9]+/g, "");
+  const playbackBase = (digitsOnly || baseName) + " - PLAYBACK";
+  const previewBase = (digitsOnly || baseName) + " - PRÉVIA";
+
   const doExport = async (format) => {
     if (!mixed) return;
     setBusy(format);
     try {
       let blob, name;
-      if (format === "wav") { blob = audioBufferToWavBlob(mixed); name = "syncvocal.wav"; }
-      else { blob = audioBufferToMp3Blob(mixed, 192); name = "syncvocal.mp3"; }
+      if (format === "wav") { blob = audioBufferToWavBlob(mixed); name = `${baseName}.wav`; }
+      else { blob = audioBufferToMp3Blob(mixed, 192); name = `${baseName}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${mixed.duration.toFixed(1)}s)`);
     } catch (e) {
@@ -71,8 +80,8 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
     setBusy(`playback-${format}`);
     try {
       let blob, name;
-      if (format === "wav") { blob = audioBufferToWavBlob(instrumentalBuffer); name = "playback.wav"; }
-      else { blob = audioBufferToMp3Blob(instrumentalBuffer, 192); name = "playback.mp3"; }
+      if (format === "wav") { blob = audioBufferToWavBlob(instrumentalBuffer); name = `${playbackBase}.wav`; }
+      else { blob = audioBufferToMp3Blob(instrumentalBuffer, 192); name = `${playbackBase}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${instrumentalBuffer.duration.toFixed(1)}s)`);
     } catch (e) {
@@ -106,8 +115,8 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, onReset }
     try {
       const preview = buildPreviewBuffer(mixed);
       let blob, name;
-      if (format === "wav") { blob = audioBufferToWavBlob(preview); name = "previa.wav"; }
-      else { blob = audioBufferToMp3Blob(preview, 192); name = "previa.mp3"; }
+      if (format === "wav") { blob = audioBufferToWavBlob(preview); name = `${previewBase}.wav`; }
+      else { blob = audioBufferToMp3Blob(preview, 192); name = `${previewBase}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${preview.duration.toFixed(1)}s)`);
     } catch (e) {

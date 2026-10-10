@@ -173,6 +173,7 @@ export default function Studio() {
           <FinalResult
             vocalBuffer={rendered}
             instrumentalBuffer={instrumentalBuffer1 || buffer1}
+            sourceName={file1?.name}
             onReset={reset}
           />
         ) : (
