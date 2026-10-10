@@ -99,14 +99,15 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceNam
     const maxLen = source.length;
     const targetLen = Math.min(maxLen, Math.floor(previewSeconds * sampleRate));
     if (targetLen >= maxLen) return source; // já é mais curto que a prévia
-    const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    const ctx = new Ctx(channels, targetLen, sampleRate);
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const out = ctx.createBuffer(channels, targetLen, sampleRate);
     for (let ch = 0; ch < channels; ch++) {
-      const src = ctx.createBuffer(channels, targetLen, sampleRate);
       const data = source.getChannelData(ch).subarray(0, targetLen);
-      src.copyToChannel(data, ch, 0);
+      out.copyToChannel(data, ch, 0);
     }
-    return ctx.buffer;
+    ctx.close();
+    return out;
   };
 
   const doExportPreview = async (format) => {
