@@ -232,7 +232,6 @@ export default function Studio() {
                     file={file2}
                     isolated={isolatedBuffer2}
                     onIsolated={setIsolatedBuffer2}
-                    canStart={!file1 || !!(isolatedBuffer1 && instrumentalBuffer1)}
                   />
                   {isolatedBuffer2 && (
                     <ManualRepair
