@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Pause, Plus, Download, Loader2, Volume2, Headphones, Trash2 } from "lucide-react";
+import { Play, Pause, Plus, Download, Loader2, Volume2, Headphones, Trash2, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { decodeAudioFile } from "@/lib/audioEngine";
 import { renderMultiTrack } from "@/lib/mixEngine";
+import { autoMatchGains } from "@/lib/loudness";
 import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 import { audioBufferToMp3Blob } from "@/lib/mp3Encoder";
 
@@ -139,6 +140,13 @@ export default function MixEditor({ initialBuffer, initialLabel }) {
     setTracks((t) => t.map((tr) => (tr.id === id ? { ...tr, ...patch } : tr)));
   const remove = (id) => setTracks((t) => t.filter((tr) => tr.id !== id));
 
+  const autoMatchVolumes = () => {
+    setTracks((prev) => {
+      const newGains = autoMatchGains(prev);
+      return prev.map((tr, i) => ({ ...tr, gain: newGains[i] }));
+    });
+  };
+
   const doExport = async (format) => {
     setBusy(format);
     try {
@@ -193,9 +201,20 @@ export default function MixEditor({ initialBuffer, initialLabel }) {
             <div className="h-full bg-primary transition-all" style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-          <Plus className="mr-1 h-4 w-4" /> Adicionar pista
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={autoMatchVolumes}
+            disabled={tracks.length < 2}
+            title="Ajusta o volume de todas as pistas para o mesmo nível"
+          >
+            <Scale className="mr-1 h-4 w-4" /> Igualar volumes
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+            <Plus className="mr-1 h-4 w-4" /> Adicionar pista
+          </Button>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
