@@ -6,7 +6,7 @@ import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
 import ResultPanel from "@/components/audio/ResultPanel";
-import { decodeAudioFile, renderMix, isolateVocal, isolateVocalFal } from "@/lib/audioEngine";
+import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
 
 const DEFAULT_SETTINGS = {
@@ -15,8 +15,7 @@ const DEFAULT_SETTINGS = {
   autoAlign: true,
   autoSync: true,
   preservePitch: true,
-  isolate: { enabled: false, method: "local", strength: 0.7 },
-  mix: { reference: 0.8, vocal: 1 },
+  mix: { reference: 0, vocal: 1 },
   eq: { low: 0, mid: 0, high: 0, lowFreq: 220, midFreq: 1200, highFreq: 4500 },
   reverb: { amount: 0.25, duration: 2, decay: 2 },
   delay: { time: 0.25, feedback: 0.3, amount: 0.15 },
@@ -72,17 +71,8 @@ export default function Studio() {
       setActiveStep("decode");
       await new Promise((r) => setTimeout(r, 500));
 
-      // Optional vocal isolation on the vocal track (Áudio 2) before mix.
-      let vocalForMix = buffer2;
-      if (settings.isolate?.enabled) {
-        setActiveStep("isolate");
-        vocalForMix = settings.isolate.method === "ai"
-          ? await isolateVocalFal(buffer2)
-          : await isolateVocal(buffer2);
-      }
-
       setActiveStep("sync");
-      const aligned = await alignVocal(buffer1, vocalForMix, settings);
+      const aligned = await alignVocal(buffer1, buffer2, settings);
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
@@ -139,20 +129,21 @@ export default function Studio() {
                   Sincronize seu vocal com uma referência de IA
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Envie a faixa de referência e sua gravação de voz. O processamento acontece
-                  inteiramente no seu navegador.
+                  Envie a voz da IA e a sua voz, ambas já isoladas. Sua voz passa a seguir o
+                  andamento, os silêncios e a duração do Áudio 1. Tudo é processado no seu
+                  navegador, sem custo de API.
                 </p>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <UploadZone
-                  label="Áudio 1 — Referência / IA"
+                  label="Áudio 1 — Voz da IA (isolada)"
                   hint="Arraste ou clique · MP3, WAV, M4A, OGG"
                   file={file1}
                   onFile={setFile1}
                 />
                 <UploadZone
-                  label="Áudio 2 — Vocal"
+                  label="Áudio 2 — Voz humana (isolada)"
                   hint="Arraste ou clique · MP3, WAV, M4A, OGG"
                   file={file2}
                   onFile={setFile2}

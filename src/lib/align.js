@@ -43,18 +43,12 @@ export async function computeAutoWarp(refBuffer, vocalBuffer) {
   return { warp: buildWarp(dtw.path, tq, tr, fr.hop), cost: dtw.cost };
 }
 
-// Length (s) the warped vocal needs so that none of it is cut off.
-function timelineLength(warp, refDur, vocalDur) {
-  let t = refDur;
-  while (warp(t) < vocalDur && t < refDur + 60) t += 0.25;
-  return t + 0.1;
-}
-
+// The result is exactly as long as the reference: anything the vocal sings
+// after the reference ends is dropped.
 async function stretchToTimeline(vocalBuffer, warp, refDur) {
   const channels = [];
   for (let c = 0; c < vocalBuffer.numberOfChannels; c++) channels.push(vocalBuffer.getChannelData(c));
-  const outDur = timelineLength(warp, refDur, vocalBuffer.duration);
-  const out = await warpStretch(channels, vocalBuffer.sampleRate, warp, outDur);
+  const out = await warpStretch(channels, vocalBuffer.sampleRate, warp, refDur);
   const buffer = new AudioBuffer({
     length: out[0].length,
     numberOfChannels: out.length,

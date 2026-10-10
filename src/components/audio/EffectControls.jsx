@@ -32,59 +32,16 @@ export default function EffectControls({ settings, onChange }) {
   const setReverb = (patch) => set({ reverb: { ...settings.reverb, ...patch } });
   const setDelay = (patch) => set({ delay: { ...settings.delay, ...patch } });
   const setComp = (patch) => set({ compressor: { ...settings.compressor, ...patch } });
-  const setIsolate = (patch) =>
-    set({ isolate: { ...settings.isolate, method: "local", ...patch } });
 
   return (
     <div className="space-y-6">
-      {/* Voice isolation */}
-      <div className="space-y-4">
-        <h4 className="text-sm font-semibold">Isolamento de voz</h4>
-        <p className="text-xs text-muted-foreground -mt-2">
-          O filtro local é aproximado: não separa instrumentos que estão no centro junto com a
-          voz. Para uma separação real, use a IA (Demucs).
-        </p>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Ativar filtro</Label>
-          <Switch
-            checked={settings.isolate.enabled}
-            onCheckedChange={(v) => setIsolate({ enabled: v })}
-          />
-        </div>
-        {settings.isolate.enabled && (
-          <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
-            <Label className="text-xs text-muted-foreground">Método de separação</Label>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Filtro local (instantâneo)</Label>
-              <Switch
-                checked={settings.isolate.method !== "ai"}
-                onCheckedChange={(v) => setIsolate({ method: v ? "local" : "ai" })}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">IA · Demucs no fal.ai</Label>
-              <Switch
-                checked={settings.isolate.method === "ai"}
-                onCheckedChange={(v) => setIsolate({ method: v ? "ai" : "local" })}
-              />
-            </div>
-            {settings.isolate.method === "ai" && (
-              <p className="text-xs text-muted-foreground">
-                Envia o Áudio 2 ao fal.ai para separar a voz dos instrumentos. Consome créditos do fal.ai e pode levar alguns minutos.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="h-px bg-border" />
-
       {/* Alignment */}
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Alinhamento de Tempo</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Acompanha a melodia e o ritmo do Áudio 1 frase por frase, esticando ou
-          encurtando o Áudio 2 sem mudar o tom da voz.
+          Acompanha o ritmo do Áudio 1 frase por frase, esticando ou encurtando o Áudio 2
+          sem mudar o tom da voz. O resultado tem a mesma duração do Áudio 1 e fica em
+          silêncio onde o Áudio 1 está em silêncio.
         </p>
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Sincronizar automaticamente</Label>
