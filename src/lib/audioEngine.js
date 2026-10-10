@@ -30,58 +30,118 @@ function makeImpulseResponse(ctx, { duration = 2, decay = 2 } = {}) {
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-// Run AI vocal isolation (Demucs via Replicate) on an uploaded File.
-// Uploads the file to private storage, starts a prediction, polls until it
-// finishes, then fetches and decodes the returned vocals stem.
-export async function isolateVocalWithAI(file, { onPoll } = {}) {
-  const { base44 } = await import("@/api/base44Client");
+// Isolate the vocal from an AudioBuffer entirely in the browser.
+//
+// Two-stage strategy:
+//   1. Center extraction (mid/side). For stereo input, keep `mid` and
+//      suppress `side`: the lead vocal is usually panned dead center (so it
+//      lives in `mid`), while widely-panned instruments (guitars, keys,
+//      cymbals, stereo reverb) live in `side`. Mono input has no side, so we
+//      skip straight to the EQ stage.
+//   2. Vocal-band EQ: high-pass ~110 Hz (cut bass/kick), low-pass ~9 kHz (cut
+//      cymbals/air), notches around the snare/body region (~200 Hz and
+//      ~5 kHz) where centered instruments share space with the voice, and a
+//      presence boost around 2–4 kHz where the voice is most intelligible.
+//   3. Mild compression to even out the isolated vocal level.
+//
+// This keeps only the vocal — instruments are removed as much as a browser
+// filter chain allows. It is not as clean as a neural separator, but it runs
+// instantly and fully offline (no external services, no uploads).
+export async function isolateVocal(buffer) {
+  const rate = buffer.sampleRate;
+  const channels = buffer.numberOfChannels;
+  const length = buffer.length;
 
-  // 1. Upload the raw vocal file to private storage.
-  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({
-    file,
-  });
-
-  // 2. Start the Demucs prediction.
-  const startRes = await base44.functions.invoke("isolateVocalsStart", {
-    file_uri,
-  });
-  const predictionId = startRes.data?.prediction_id;
-  if (!predictionId) {
-    throw new Error(startRes.data?.error || "Não foi possível iniciar o isolamento.");
-  }
-
-  // 3. Poll until the prediction finishes (Demucs takes ~30–90s).
-  let vocalsUrl = null;
-  for (let attempt = 0; attempt < 60; attempt++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const pollRes = await base44.functions.invoke("isolateVocalsPoll", {
-      prediction_id: predictionId,
-    });
-    const data = pollRes.data || {};
-    if (onPoll) onPoll(data.status, attempt);
-    if (data.status === "succeeded") {
-      vocalsUrl = data.vocals_url;
-      break;
+  // --- Stage 1: center extraction -> mono ---
+  let center;
+  if (channels >= 2) {
+    const L = buffer.getChannelData(0);
+    const R = buffer.getChannelData(1);
+    center = new Float32Array(length);
+    for (let i = 0; i < length; i++) {
+      // Keep mid, remove side entirely (strength = 1).
+      center[i] = (L[i] + R[i]) * 0.5;
     }
-    if (data.status === "failed" || data.error) {
-      throw new Error(data.error || "O isolamento falhou no servidor.");
-    }
-  }
-  if (!vocalsUrl) {
-    throw new Error("O isolamento demorou demais. Tente novamente.");
+  } else {
+    center = buffer.getChannelData(0).slice();
   }
 
-  // 4. Fetch the isolated vocals MP3 and decode it.
-  const resp = await fetch(vocalsUrl);
-  if (!resp.ok) throw new Error("Não foi possível baixar a voz isolada.");
-  const arrayBuffer = await resp.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
-  try {
-    return await ctx.decodeAudioData(arrayBuffer.slice(0));
-  } finally {
-    ctx.close();
-  }
+  // --- Stage 2 + 3: vocal-band EQ + compression, offline render ---
+  const offline = new OfflineAudioContext(1, length, rate);
+  const centerBuffer = offline.createBuffer(1, length, rate);
+  centerBuffer.copyToChannel(center, 0);
+
+  const src = offline.createBufferSource();
+  src.buffer = centerBuffer;
+
+  // High-pass: cut bass / kick / rumble.
+  const hp = offline.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 110;
+  hp.Q.value = 0.7;
+
+  // Low-pass: cut cymbals, hi-hats, air.
+  const lp = offline.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 9000;
+  lp.Q.value = 0.7;
+
+  // Notch out snare/body region that centered instruments share.
+  const notchLow = offline.createBiquadFilter();
+  notchLow.type = "peaking";
+  notchLow.frequency.value = 200;
+  notchLow.Q.value = 1.0;
+  notchLow.gain.value = -6;
+
+  // Notch out the "boxy" mid area where guitars/keys often sit.
+  const notchMid = offline.createBiquadFilter();
+  notchMid.type = "peaking";
+  notchMid.frequency.value = 500;
+  notchMid.Q.value = 1.2;
+  notchMid.gain.value = -5;
+
+  // Notch out cymbal presence region.
+  const notchHigh = offline.createBiquadFilter();
+  notchHigh.type = "peaking";
+  notchHigh.frequency.value = 5000;
+  notchHigh.Q.value = 1.0;
+  notchHigh.gain.value = -5;
+
+  // Presence boost where the voice is most intelligible.
+  const presence = offline.createBiquadFilter();
+  presence.type = "peaking";
+  presence.frequency.value = 3000;
+  presence.Q.value = 0.9;
+  presence.gain.value = 3;
+
+  // Gentle compression to even out the isolated vocal.
+  const comp = offline.createDynamicsCompressor();
+  comp.threshold.value = -24;
+  comp.knee.value = 30;
+  comp.ratio.value = 3;
+  comp.attack.value = 0.005;
+  comp.release.value = 0.25;
+
+  src.connect(hp);
+  hp.connect(lp);
+  lp.connect(notchLow);
+  notchLow.connect(notchMid);
+  notchMid.connect(notchHigh);
+  notchHigh.connect(presence);
+  presence.connect(comp);
+  comp.connect(offline.destination);
+  src.start(0);
+
+  const isolated = await offline.startRendering();
+
+  // Up-mix back to the original channel count for downstream consistency.
+  if (channels <= 1) return isolated;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const out = ctx.createBuffer(channels, isolated.length, rate);
+  const data = isolated.getChannelData(0);
+  for (let ch = 0; ch < channels; ch++) out.copyToChannel(data, ch);
+  ctx.close();
+  return out;
 }
 
 // Detect the first non-silent sample of a buffer (in seconds).

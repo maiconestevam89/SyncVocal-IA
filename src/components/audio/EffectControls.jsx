@@ -40,8 +40,8 @@ export default function EffectControls({ settings, onChange }) {
       <div className="space-y-4">
         <h4 className="text-sm font-semibold">Isolamento de voz</h4>
         <p className="text-xs text-muted-foreground -mt-2">
-          Usa IA (Demucs) para separar e manter somente a voz do Áudio 2, removendo
-          instrumentos da mixagem. Processamento na nuvem, pode levar cerca de um minuto.
+          Mantém somente a faixa de voz do Áudio 2, removendo instrumentos da mixagem.
+          Processado no navegador, instantâneo.
         </p>
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Ativar isolamento</Label>
