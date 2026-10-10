@@ -105,12 +105,14 @@ export default function Studio() {
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
-      // Use the real instrumental (Audio 1 with the vocal removed) so the
-      // original voice of Audio 1 never appears in the output. Fall back to
-      // the full Audio 1 only if the instrumental wasn't isolated.
+      // renderMix outputs ONLY the aligned vocal; the instrumental is mixed
+      // later in the MixEditor. We never pass buffer1 (full Audio 1) as the
+      // instrumental, because that would leak the original voice into the
+      // result. If isolation hasn't finished, we still render the vocal —
+      // the MixEditor will add whatever instrumental is available.
       const rendered = await renderMix(reference, aligned.buffer, settings, {
         ...aligned,
-        instrumentalBuffer: instrumentalBuffer1 || buffer1,
+        instrumentalBuffer: null,
       });
       setRendered(rendered);
       setStage("result");
@@ -132,8 +134,9 @@ export default function Studio() {
     setRepairedBuffer2(null);
   };
 
-  // Ready when Audio 1 is decoded (and optionally isolated) and a vocal is available.
-  const ready = buffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
+  // Ready when the isolated reference AND the real instrumental are available
+  // (both come from isolating Audio 1), plus a vocal to sync.
+  const ready = isolatedBuffer1 && instrumentalBuffer1 && (buffer2 || isolatedBuffer2) && stage === "upload";
 
   // The vocal that's currently "active" for preview / processing.
   const activeVocal2 = repairedBuffer2 || isolatedBuffer2 || buffer2;
