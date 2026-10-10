@@ -6,10 +6,15 @@ import { base44 } from "@/api/base44Client";
 // Sends the uploaded audio file to the Kits.ai vocal isolation backend
 // function and returns the decoded isolated-vocal AudioBuffer.
 export async function isolateVocal(file, onStatus) {
-  const form = new FormData();
-  form.append("inputFile", file);
+  // 1. Upload to private storage so the backend function can fetch the bytes
+  //    by file_uri — the SDK invoke() payload must be JSON-serializable.
   onStatus?.("uploading");
-  const res = await base44.functions.invoke("isolateVocal", form);
+  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+
+  // 2. Ask the backend function to run the Kits separation and stream back
+  //    the isolated vocal audio bytes.
+  onStatus?.("processing");
+  const res = await base44.functions.invoke("isolateVocal", { file_uri });
   if (res.status >= 400) {
     const msg = res.data?.error || "Falha no isolamento de voz.";
     throw new Error(msg);
@@ -37,7 +42,8 @@ export default function VocalIsolator({ file, onIsolated, isolated }) {
     setMessage("Enviando para o kits.ai…");
     try {
       const buffer = await isolateVocal(file, (s) => {
-        if (s === "decoding") setMessage("Decodificando vocal isolado…");
+        if (s === "processing") setMessage("Isolando voz no kits.ai…");
+        else if (s === "decoding") setMessage("Decodificando vocal isolado…");
       });
       onIsolated(buffer);
       setStatus("idle");

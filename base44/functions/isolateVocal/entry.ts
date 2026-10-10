@@ -1,9 +1,9 @@
 import { secrets } from "base44:runtime";
 
 // Isolates the vocal from an uploaded audio file using the Kits.ai vocal
-// separation API. The frontend sends the file bytes as multipart/form-data
-// (field name "inputFile"); we forward the same multipart body to Kits and
-// poll the job until it finishes, then return the signed vocal URL.
+// separation API. The frontend uploads the file to private storage and sends
+// us the file_uri; we download the bytes, forward them to Kits as multipart,
+// poll the job until it finishes, then stream the isolated vocal back.
 //
 // Kits API reference:
 //   POST https://arpeggi.io/api/kits/v1/vocal-separations  (multipart, inputFile)
@@ -21,22 +21,35 @@ export default async function(req) {
       return Response.json({ error: "Chave KITS_API_KEY não configurada." }, { status: 500 });
     }
 
-    // The frontend sends the raw uploaded file as multipart/form-data with
-    // field "inputFile". We forward the request body straight to Kits, which
-    // accepts the same multipart shape — no need to re-buffer the file.
-    const contentType = req.headers.get("content-type") || "";
-    if (!contentType.toLowerCase().includes("multipart/form-data")) {
-      return Response.json({ error: "Esperado multipart/form-data com o arquivo." }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const fileUri = body?.file_uri;
+    if (!fileUri || typeof fileUri !== "string") {
+      return Response.json({ error: "Parâmetro file_uri ausente." }, { status: 400 });
     }
 
-    // Create the separation job, forwarding the original multipart body.
+    // Download the uploaded audio bytes from private storage.
+    const fileRes = await fetch(fileUri, { signal: AbortSignal.timeout(60000) });
+    if (!fileRes.ok) {
+      return Response.json(
+        { error: `Falha ao ler arquivo enviado: ${fileRes.status}` },
+        { status: 502 }
+      );
+    }
+    const fileBytes = await fileRes.arrayBuffer();
+    const fileContentType = fileRes.headers.get("content-type") || "audio/mpeg";
+    const ext = (fileUri.split(".").pop() || "mp3").split("?")[0].toLowerCase();
+    const filename = `input.${ext}`;
+
+    // Build the multipart body Kits expects (field name "inputFile").
+    const form = new FormData();
+    form.append("inputFile", new Blob([fileBytes], { type: fileContentType }), filename);
+
+    // Create the separation job.
     const createRes = await fetch(`${KITS_BASE}/vocal-separations`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
-      body: req.body,
+      body: form,
       signal: AbortSignal.timeout(60000),
-      // @ts-ignore — duplex is required when streaming a request body.
-      duplex: "half",
     });
 
     if (!createRes.ok) {
