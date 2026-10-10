@@ -5,7 +5,7 @@ import UploadZone from "@/components/audio/UploadZone";
 import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
 import ProcessingOverlay from "@/components/audio/ProcessingOverlay";
-import ResultPanel from "@/components/audio/ResultPanel";
+import MixEditor from "@/components/audio/MixEditor";
 import VocalIsolator from "@/components/audio/VocalIsolator";
 import ManualRepair from "@/components/audio/ManualRepair";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
@@ -141,7 +141,7 @@ export default function Studio() {
 
       <main className="mx-auto max-w-6xl px-4 py-8">
         {stage === "result" ? (
-          <ResultPanel renderedBuffer={rendered} onReset={reset} />
+          <MixEditor initialBuffer={rendered} initialLabel="Vocal sincronizado" />
         ) : (
           <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
             {/* Left: upload + preview */}
