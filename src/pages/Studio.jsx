@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { AudioLines, Sparkles, Clock, Wand2 } from "lucide-react";
 import UploadZone from "@/components/audio/UploadZone";
@@ -38,6 +38,7 @@ export default function Studio() {
   const [activeStep, setActiveStep] = useState(null);
   const [rendered, setRendered] = useState(null);
   const [error, setError] = useState(null);
+  const autoProcessedRef = useRef(false);
 
   // Decode files as they arrive.
   useEffect(() => {
@@ -131,6 +132,7 @@ export default function Studio() {
     setInstrumentalBuffer1(null);
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
+    autoProcessedRef.current = false;
     setError(null);
   };
 
@@ -140,6 +142,15 @@ export default function Studio() {
 
   // The vocal that's currently "active" for preview / processing.
   const activeVocal2 = repairedBuffer2 || isolatedBuffer2 || buffer2;
+
+  // Auto-process as soon as both isolations complete (no manual click needed).
+  useEffect(() => {
+    if (ready && !autoProcessedRef.current) {
+      autoProcessedRef.current = true;
+      process();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   return (
     <div className="min-h-screen bg-background">
