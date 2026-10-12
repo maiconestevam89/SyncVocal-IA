@@ -66,14 +66,14 @@ export default async function(req) {
     const logs = { phone: customerPhone, step1: null, step2: null, debug };
 
     // ETAPA 1: Iniciar o chatbot "Música pronta"
-    // No endpoint start-bot, apesar da documentação dizer toPhone=canal, o comportamento
-    // real da API é o mesmo do endpoint de mensagens: toPhone = destino (cliente), fromPhone = origem (canal)
+    // No endpoint start-bot, a semântica é OPOSTA à do endpoint de mensagens:
+    // toPhone = canal (empresa), fromPhone = contato (cliente) — conforme documentação oficial.
     const step1Body = {
       botId,
       organizationId: orgId,
       triggerName,
-      toPhone: customerPhone,
-      fromPhone: channelPhone,
+      toPhone: channelPhone,
+      fromPhone: customerPhone,
     };
 
     const step1Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
@@ -114,6 +114,10 @@ export default async function(req) {
     // ETAPA 2: Enviar o arquivo de mídia (prévia de 1:10)
     // Executada EXCLUSIVAMENTE após a confirmação de sucesso da Etapa 1.
     // No endpoint simplified: ToPhone = destino (cliente), FromPhone = origem (canal)
+
+    // Pausa de 8s para o chatbot enviar a saudação antes do áudio chegar
+    await new Promise((r) => setTimeout(r, 8000));
+
     const audioRes = await fetch(file_url, { signal: AbortSignal.timeout(30000) });
     if (!audioRes.ok) {
       await base44.entities.UmblerTalkLog.create({
