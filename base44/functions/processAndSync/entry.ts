@@ -27,23 +27,19 @@ export default async function(req) {
         await base44.asServiceRole.entities.ProcessingJob.update(job_id, { status: "processing" });
       }
 
-      // Create signed URLs and download all three files in parallel
+      // Create signed URLs for all three files at once (cheap, no data transferred)
       const [v1Signed, v2Signed, instSigned] = await Promise.all([
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: vocal1_uri }),
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: vocal2_uri }),
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: instrumental_uri }),
       ]);
 
-      const [v1Bytes, v2Bytes, instBytes] = await Promise.all([
-        downloadAudio(v1Signed.signed_url),
-        downloadAudio(v2Signed.signed_url),
-        downloadAudio(instSigned.signed_url),
-      ]);
-
-      // Decode WAV files
-      const vocal1 = decodeWav(v1Bytes);
-      const vocal2 = decodeWav(v2Bytes);
-      const instrumental = decodeWav(instBytes);
+      // Download and decode ONE file at a time to stay within the worker memory
+      // limit. Each WAV as ArrayBuffer + decoded Float32Array is large; loading
+      // all three in parallel crashes the worker (exceededMemory).
+      const vocal1 = decodeWav(await (await downloadAudio(v1Signed.signed_url)).arrayBuffer());
+      const vocal2 = decodeWav(await (await downloadAudio(v2Signed.signed_url)).arrayBuffer());
+      const instrumental = decodeWav(await (await downloadAudio(instSigned.signed_url)).arrayBuffer());
 
       // Process and mix: align → silence-gate → auto-match gains → mix to stereo
       const mixed = await processAndMix(vocal1, vocal2, instrumental);
