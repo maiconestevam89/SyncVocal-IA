@@ -37,11 +37,11 @@ export async function tdPsola(channels, sr, f0Src, f0Tgt, hopSec) {
     qEnd += tgtPeriods[i];
   }
 
-  // 3. Scale output positions to preserve input duration.
+  // 3. PSOLA overlap-add at target-period intervals (no duration scaling —
+  //    scaling would cancel the pitch shift). The output buffer is the same
+  //    length as the input; any trailing unprocessed samples stay zero and
+  //    are handled by the silence gate downstream.
   const qStart = marks[0].pos;
-  const durRatio = qEnd > qStart ? (n - qStart) / (qEnd - qStart) : 1;
-
-  // 4. PSOLA overlap-add.
   let q = qStart;
   for (let i = 0; i < marks.length; i++) {
     const { pos: p, period: Ps } = marks[i];
@@ -57,7 +57,7 @@ export async function tdPsola(channels, sr, f0Src, f0Tgt, hopSec) {
       }
     }
 
-    q += tgtPeriods[i] * durRatio;
+    q += tgtPeriods[i];
     if (q >= n) break;
     if (i % 500 === 0) await tick();
   }

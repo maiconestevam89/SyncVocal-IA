@@ -16,6 +16,28 @@ const KITS_BASE = "https://arpeggi.io/api/kits/v1";
 const POLL_INTERVAL_MS = 3000;
 const POLL_TIMEOUT_MS = 180000; // 3 min ceiling for the repair job
 
+// Detect audio format from file magic bytes (see isolateVocal for details).
+function detectAudioFormat(bytes: ArrayBuffer): { ext: string; type: string; supported: boolean } {
+  const v = new Uint8Array(bytes);
+  if (v.length < 12) return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0x52 && v[1] === 0x49 && v[2] === 0x46 && v[3] === 0x46 &&
+      v[8] === 0x57 && v[9] === 0x41 && v[10] === 0x56 && v[11] === 0x45)
+    return { ext: "wav", type: "audio/wav", supported: true };
+  if (v[0] === 0x66 && v[1] === 0x4C && v[2] === 0x61 && v[3] === 0x43)
+    return { ext: "flac", type: "audio/flac", supported: true };
+  if (v[0] === 0x49 && v[1] === 0x44 && v[2] === 0x33)
+    return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0xFF && (v[1] === 0xFB || v[1] === 0xF3 || v[1] === 0xF2))
+    return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0x4F && v[1] === 0x67 && v[2] === 0x67 && v[3] === 0x53)
+    return { ext: "ogg", type: "audio/ogg", supported: false };
+  if (v[0] === 0x1A && v[1] === 0x45 && v[2] === 0xDF && v[3] === 0xA3)
+    return { ext: "webm", type: "audio/webm", supported: true };
+  if (v.length >= 8 && v[4] === 0x66 && v[5] === 0x74 && v[6] === 0x79 && v[7] === 0x70)
+    return { ext: "m4a", type: "audio/mp4", supported: false };
+  return { ext: "mp3", type: "audio/mpeg", supported: true };
+}
+
 export default async function(req) {
   try {
     const apiKey = secrets.get("KITS_API_KEY");
@@ -38,8 +60,7 @@ export default async function(req) {
       );
     }
     const fileBytes = await fileRes.arrayBuffer();
-    const fileContentType = fileRes.headers.get("content-type") || "audio/mpeg";
-    const ext = (fileUrl.split(".").pop() || "mp3").split("?")[0].toLowerCase();
+    const { ext, type: fileContentType } = detectAudioFormat(fileBytes);
     const filename = `input.${ext}`;
 
     // Pre-processing effects = the "repair": noise gate + high-pass + gentle
