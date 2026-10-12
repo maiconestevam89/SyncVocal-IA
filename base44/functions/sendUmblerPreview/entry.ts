@@ -3,22 +3,25 @@ import { secrets } from 'base44:runtime';
 
 const UTALK_BASE = "https://app-utalk.umbler.com/api";
 
-// Extrai apenas os dígitos do nome do arquivo e formata em E.164.
-// Regras: 10-11 dígitos → +55 + dígitos; 12-13 dígitos começando com 55 → + + dígitos.
-// Retorna null se não for possível formar um número E.164 válido.
+// Extrai o telefone do nome do arquivo buscando grupos contíguos de dígitos.
+// Isso evita que sufixos numéricos (ex: "FINAL01", "MUSICA09") sejam anexados ao número.
+// Regras por grupo: 10-11 dígitos → +55 + dígitos; 12-13 dígitos começando com 55 → + + dígitos.
+// Retorna o primeiro grupo válido em E.164, ou null se nenhum servir.
 function extractPhone(filename) {
-  const digits = (filename || "").replace(/[^0-9]/g, "");
-  if (!digits) return null;
-  let phone;
-  if (digits.length === 10 || digits.length === 11) {
-    phone = "+55" + digits;
-  } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) {
-    phone = "+" + digits;
-  } else {
-    return null;
+  const groups = (filename || "").match(/\d+/g);
+  if (!groups) return null;
+  for (const digits of groups) {
+    let phone;
+    if (digits.length === 10 || digits.length === 11) {
+      phone = "+55" + digits;
+    } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) {
+      phone = "+" + digits;
+    } else {
+      continue;
+    }
+    if (/^\+[1-9]\d{1,14}$/.test(phone)) return phone;
   }
-  if (!/^\+[1-9]\d{1,14}$/.test(phone)) return null;
-  return phone;
+  return null;
 }
 
 function truncate(obj, max = 2000) {
