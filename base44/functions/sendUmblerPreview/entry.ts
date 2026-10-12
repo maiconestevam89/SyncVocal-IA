@@ -178,7 +178,54 @@ export default async function(req) {
       }, { status: 502 });
     }
 
-    // Ambas as etapas concluídas com sucesso
+    // ETAPA 3: Disparar o chatbot "Pendente de pagamento" após o envio da prévia
+    // Mesma lógica da Etapa 1: toPhone = cliente, fromPhone = canal.
+    const paymentBotId = "aaRxg5RS5vxsTe8j";
+    const paymentTriggerName = "Pendente de pagamento";
+
+    const step3Body = {
+      botId: paymentBotId,
+      organizationId: orgId,
+      triggerName: paymentTriggerName,
+      toPhone: customerPhone,
+      fromPhone: channelPhone,
+    };
+
+    const step3Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(step3Body),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    const step3Status = step3Res.status;
+    let step3Data;
+    try { step3Data = await step3Res.json(); } catch { step3Data = await step3Res.text(); }
+    logs.step3 = { status: step3Status, ok: step3Res.ok, data: step3Data };
+
+    if (!step3Res.ok) {
+      await base44.entities.UmblerTalkLog.create({
+        audio1_name,
+        phone: customerPhone,
+        status: "chatbot_started_and_preview_sent",
+        step1_http_status: step1Status,
+        step1_response: truncate(step1Data),
+        step2_http_status: step2Status,
+        step2_response: truncate(step2Data),
+        error_message: `Etapa 3 (bot Pendente de pagamento) falhou com HTTP ${step3Status}`,
+      });
+      return Response.json({
+        success: false,
+        phone: customerPhone,
+        error: `Etapas 1 e 2 OK, mas Etapa 3 falhou: bot "Pendente de pagamento" não iniciado (HTTP ${step3Status}).`,
+        logs,
+      }, { status: 502 });
+    }
+
+    // Todas as etapas concluídas com sucesso
     await base44.entities.UmblerTalkLog.create({
       audio1_name,
       phone: customerPhone,
@@ -193,7 +240,7 @@ export default async function(req) {
     return Response.json({
       success: true,
       phone: customerPhone,
-      status: "Chatbot Iniciado e Prévia Enviada",
+      status: "Chatbot Iniciado, Prévia Enviada e Pendente de Pagamento Disparado",
       logs,
     });
   } catch (error) {

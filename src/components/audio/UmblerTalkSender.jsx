@@ -86,9 +86,9 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
         <h3 className="text-sm font-semibold">Disparo no WhatsApp (Umbler Talk)</h3>
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
-        Inicia o chatbot "Música pronta" e, após confirmação de sucesso, envia a prévia
-        de 1min10s em anexo no WhatsApp do cliente. O telefone é extraído do nome do
-        Áudio 1 (apenas dígitos, formato E.164).
+        Inicia o chatbot "Música pronta", envia a prévia de 1min10s em anexo e, por fim,
+        dispara o bot "Pendente de pagamento" no WhatsApp do cliente. O telefone é extraído
+        do nome do Áudio 1 (apenas dígitos, formato E.164).
       </p>
 
       {state === "idle" && (
@@ -101,7 +101,7 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
       {state === "sending" && (
         <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Iniciando chatbot e enviando prévia…</span>
+          <span>Iniciando chatbot, enviando prévia e disparando pagamento…</span>
         </div>
       )}
 

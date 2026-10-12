@@ -23,7 +23,7 @@
     },
     "step1_http_status": {
       "type": "number",
-      "description": "HTTP status retornado pela Etapa 1 (start-bot)"
+      "description": "HTTP status retornado pela Etapa 1 (start-bot M\u00fasica pronta)"
     },
     "step1_response": {
       "type": "string",
@@ -36,6 +36,14 @@
     "step2_response": {
       "type": "string",
       "description": "Resposta JSON da Etapa 2 (truncada)"
+    },
+    "step3_http_status": {
+      "type": "number",
+      "description": "HTTP status retornado pela Etapa 3 (start-bot Pendente de pagamento)"
+    },
+    "step3_response": {
+      "type": "string",
+      "description": "Resposta JSON da Etapa 3 (truncada)"
     },
     "error_message": {
       "type": "string",
