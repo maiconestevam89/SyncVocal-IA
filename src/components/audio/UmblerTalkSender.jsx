@@ -62,7 +62,7 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
       }
     } catch (e) {
       setState("error");
-      setResult(e.message || "Erro inesperado.");
+      setResult(e?.data?.error || e?.data?.message || e?.message || "Erro inesperado.");
     }
   };
 
