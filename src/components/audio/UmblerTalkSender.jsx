@@ -29,10 +29,11 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
   const [result, setResult] = useState(null);
   const [logs, setLogs] = useState(null);
 
-  const extractErr = (e) =>
-    e?.data?.error?.message || e?.data?.error ||
-    (typeof e?.data?.message === "string" ? e.data.message : null) ||
-    e?.data?.detail || e?.message || "Erro inesperado.";
+  const extractErr = (e) => {
+    const d = e?.response?.data ?? e?.data;
+    return d?.error?.message || d?.error || (typeof d?.message === "string" ? d.message : null) ||
+      d?.detail || e?.message || "Erro inesperado.";
+  };
 
   const send = async () => {
     if (!mixed) return;
@@ -74,7 +75,7 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
       const detail = extractErr(e);
       setResult(`Etapa "${step}": ${detail}`);
       // Expõe o objeto completo do erro para diagnóstico
-      setLogs({ step, status: e?.status, code: e?.code, data: e?.data, message: e?.message });
+      setLogs(e?.response?.data?.logs || { step, status: e?.status, data: e?.response?.data ?? e?.data, message: e?.message });
     }
   };
 
