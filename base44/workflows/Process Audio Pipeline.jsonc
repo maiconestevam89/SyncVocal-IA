@@ -1,6 +1,6 @@
 {
   "name": "Process Audio Pipeline",
-  "description": "Isola vocais (kits.ai), sincroniza, mixa e envia pr\u00e9via via WhatsApp \u2014 polling encadeado sem ciclos.",
+  "description": "Isola vocais (kits.ai), sincroniza, mixa e envia pr\u00e9via via WhatsApp \u2014 download/upload separado por arquivo para evitar estouro de mem\u00f3ria do worker.",
   "trigger": {
     "config": {
       "trigger_type": "entity",
@@ -15,7 +15,7 @@
     "document": {
       "dsl": "1.0.0",
       "name": "process_audio_pipeline",
-      "version": "3.0",
+      "version": "4.0",
       "namespace": "base44"
     },
     "do": [
@@ -82,8 +82,7 @@
             "function_name": "checkKitsIsolation",
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
-              "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "with_instrumental": true
             }
           },
           "then": "check1a_sw",
@@ -98,7 +97,7 @@
           "switch": [
             {
               "when": "${ .check1a.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -127,7 +126,7 @@
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
               "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 1
             }
           },
           "then": "check1b_sw",
@@ -142,7 +141,7 @@
           "switch": [
             {
               "when": "${ .check1b.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -171,7 +170,7 @@
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
               "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 2
             }
           },
           "then": "check1c_sw",
@@ -186,7 +185,7 @@
           "switch": [
             {
               "when": "${ .check1c.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -215,7 +214,7 @@
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
               "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 3
             }
           },
           "then": "check1d_sw",
@@ -230,7 +229,7 @@
           "switch": [
             {
               "when": "${ .check1d.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -259,7 +258,7 @@
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
               "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 4
             }
           },
           "then": "check1e_sw",
@@ -274,7 +273,7 @@
           "switch": [
             {
               "when": "${ .check1e.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -303,7 +302,7 @@
             "args": {
               "kits_job_id": "${ .start1.kits_job_id }",
               "with_instrumental": true,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 5
             }
           },
           "then": "check1f_sw",
@@ -318,7 +317,7 @@
           "switch": [
             {
               "when": "${ .check1f.done == true }",
-              "then": "check2a"
+              "then": "store_v1"
             },
             {
               "when": "${ true }",
@@ -342,8 +341,45 @@
           },
           "then": "end",
           "x-base44": {
-            "title": "Falhar job",
-            "description": "\u00c1udio 1 excedeu limite"
+            "title": "Falhar job"
+          }
+        }
+      },
+      {
+        "store_v1": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "storeKitsResult",
+            "args": {
+              "audio_url": "${ .check1a.vocal_url // .check1b.vocal_url // .check1c.vocal_url // .check1d.vocal_url // .check1e.vocal_url // .check1f.vocal_url }",
+              "filename": "vocal1.wav",
+              "job_id": "${ .trigger.entity_id }",
+              "field_name": "vocal1_uri"
+            }
+          },
+          "then": "store_i1",
+          "x-base44": {
+            "title": "Salvar vocal 1",
+            "description": "Download + upload"
+          }
+        }
+      },
+      {
+        "store_i1": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "storeKitsResult",
+            "args": {
+              "audio_url": "${ .check1a.instrumental_url // .check1b.instrumental_url // .check1c.instrumental_url // .check1d.instrumental_url // .check1e.instrumental_url // .check1f.instrumental_url }",
+              "filename": "instrumental.wav",
+              "job_id": "${ .trigger.entity_id }",
+              "field_name": "instrumental_uri"
+            }
+          },
+          "then": "check2a",
+          "x-base44": {
+            "title": "Salvar instrumental",
+            "description": "Download + upload"
           }
         }
       },
@@ -354,8 +390,7 @@
             "function_name": "checkKitsIsolation",
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
-              "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "with_instrumental": false
             }
           },
           "then": "check2a_sw",
@@ -370,7 +405,7 @@
           "switch": [
             {
               "when": "${ .check2a.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -399,7 +434,7 @@
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
               "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 1
             }
           },
           "then": "check2b_sw",
@@ -414,7 +449,7 @@
           "switch": [
             {
               "when": "${ .check2b.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -443,7 +478,7 @@
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
               "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 2
             }
           },
           "then": "check2c_sw",
@@ -458,7 +493,7 @@
           "switch": [
             {
               "when": "${ .check2c.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -487,7 +522,7 @@
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
               "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 3
             }
           },
           "then": "check2d_sw",
@@ -502,7 +537,7 @@
           "switch": [
             {
               "when": "${ .check2d.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -531,7 +566,7 @@
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
               "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 4
             }
           },
           "then": "check2e_sw",
@@ -546,7 +581,7 @@
           "switch": [
             {
               "when": "${ .check2e.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -575,7 +610,7 @@
             "args": {
               "kits_job_id": "${ .start2.kits_job_id }",
               "with_instrumental": false,
-              "job_id": "${ .trigger.entity_id }"
+              "retry_count": 5
             }
           },
           "then": "check2f_sw",
@@ -590,7 +625,7 @@
           "switch": [
             {
               "when": "${ .check2f.done == true }",
-              "then": "process"
+              "then": "store_v2"
             },
             {
               "when": "${ true }",
@@ -614,8 +649,26 @@
           },
           "then": "end",
           "x-base44": {
-            "title": "Falhar job",
-            "description": "\u00c1udio 2 excedeu limite"
+            "title": "Falhar job"
+          }
+        }
+      },
+      {
+        "store_v2": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "storeKitsResult",
+            "args": {
+              "audio_url": "${ .check2a.vocal_url // .check2b.vocal_url // .check2c.vocal_url // .check2d.vocal_url // .check2e.vocal_url // .check2f.vocal_url }",
+              "filename": "vocal2.wav",
+              "job_id": "${ .trigger.entity_id }",
+              "field_name": "vocal2_uri"
+            }
+          },
+          "then": "process",
+          "x-base44": {
+            "title": "Salvar vocal 2",
+            "description": "Download + upload"
           }
         }
       },
@@ -626,9 +679,9 @@
             "function_name": "processAndSync",
             "args": {
               "job_id": "${ .trigger.entity_id }",
-              "vocal1_uri": "${ .check1a.vocal_uri // .check1b.vocal_uri // .check1c.vocal_uri // .check1d.vocal_uri // .check1e.vocal_uri // .check1f.vocal_uri }",
-              "instrumental_uri": "${ .check1a.instrumental_uri // .check1b.instrumental_uri // .check1c.instrumental_uri // .check1d.instrumental_uri // .check1e.instrumental_uri // .check1f.instrumental_uri }",
-              "vocal2_uri": "${ .check2a.vocal_uri // .check2b.vocal_uri // .check2c.vocal_uri // .check2d.vocal_uri // .check2e.vocal_uri // .check2f.vocal_uri }"
+              "vocal1_uri": "${ .store_v1.file_uri }",
+              "instrumental_uri": "${ .store_i1.file_uri }",
+              "vocal2_uri": "${ .store_v2.file_uri }"
             }
           },
           "then": "send",
