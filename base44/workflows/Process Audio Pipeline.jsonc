@@ -1,0 +1,107 @@
+{
+  "name": "Process Audio Pipeline",
+  "description": "Isola vocais (kits.ai), sincroniza, mixa e envia pr\u00e9via via WhatsApp automaticamente \u2014 roda no servidor sem depender do navegador",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "ProcessingJob",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ .trigger.data.status == \"pending\" }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "process_audio_pipeline",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "isolate1": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "isolateVocalToStorage",
+            "args": {
+              "file_uri": "${ .trigger.data.audio1_file_uri }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "rate_limit_wait",
+          "x-base44": {
+            "title": "Isolar \u00c1udio 1",
+            "description": "Voz + instrumental no kits.ai"
+          }
+        }
+      },
+      {
+        "rate_limit_wait": {
+          "wait": "PT65S",
+          "then": "isolate2",
+          "x-base44": {
+            "title": "Aguardar rate limit",
+            "description": "65s entre envios"
+          }
+        }
+      },
+      {
+        "isolate2": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "isolateVocalToStorage",
+            "args": {
+              "file_uri": "${ .trigger.data.audio2_file_uri }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "process",
+          "x-base44": {
+            "title": "Isolar \u00c1udio 2",
+            "description": "Voz do cliente no kits.ai"
+          }
+        }
+      },
+      {
+        "process": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "processAndSync",
+            "args": {
+              "job_id": "${ .trigger.entity_id }",
+              "vocal1_uri": "${ .isolate1.vocal_uri }",
+              "instrumental_uri": "${ .isolate1.instrumental_uri }",
+              "vocal2_uri": "${ .isolate2.vocal_uri }"
+            }
+          },
+          "then": "send",
+          "x-base44": {
+            "title": "Processar e sincronizar",
+            "description": "Alinhar + mixar"
+          }
+        }
+      },
+      {
+        "send": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendUmblerPreview",
+            "args": {
+              "file_url": "${ .process.preview_url }",
+              "audio1_name": "${ .trigger.data.audio1_name }",
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Enviar pr\u00e9via",
+            "description": "WhatsApp do cliente"
+          }
+        }
+      }
+    ]
+  }
+}

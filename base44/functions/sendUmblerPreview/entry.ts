@@ -22,13 +22,14 @@ function truncate(obj, max = 2000) {
 }
 
 export default async function(req) {
+  let job_id = null;
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    try { await base44.auth.me(); } catch {}
 
     const body = await req.json();
     const { file_url, audio1_name } = body;
+    job_id = body.job_id;
 
     if (!file_url || !audio1_name) {
       return Response.json({ error: "file_url e audio1_name são obrigatórios." }, { status: 400 });
@@ -65,6 +66,10 @@ export default async function(req) {
 
     const logs = { phone: customerPhone, step1: null, step2: null, debug };
 
+    if (job_id) {
+      try { await base44.asServiceRole.entities.ProcessingJob.update(job_id, { status: "sending" }); } catch {}
+    }
+
     // ETAPA 1: Iniciar o chatbot "Música pronta"
     // Apesar da documentação dizer toPhone=canal, o comportamento real da API é o mesmo
     // do endpoint de mensagens: toPhone = destino (cliente), fromPhone = origem (canal).
@@ -94,7 +99,7 @@ export default async function(req) {
 
     // Se a Etapa 1 FALHAR: interromper e NÃO enviar o arquivo de áudio
     if (!step1Res.ok) {
-      await base44.entities.UmblerTalkLog.create({
+      await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "failed",
@@ -121,7 +126,7 @@ export default async function(req) {
 
     const audioRes = await fetch(file_url, { signal: AbortSignal.timeout(30000) });
     if (!audioRes.ok) {
-      await base44.entities.UmblerTalkLog.create({
+      await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started",
@@ -160,7 +165,7 @@ export default async function(req) {
     logs.step2 = { status: step2Status, ok: step2Res.ok, data: step2Data };
 
     if (!step2Res.ok) {
-      await base44.entities.UmblerTalkLog.create({
+      await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started",
@@ -207,7 +212,7 @@ export default async function(req) {
     logs.step3 = { status: step3Status, ok: step3Res.ok, data: step3Data };
 
     if (!step3Res.ok) {
-      await base44.entities.UmblerTalkLog.create({
+      await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started_and_preview_sent",
@@ -226,7 +231,7 @@ export default async function(req) {
     }
 
     // Todas as etapas concluídas com sucesso
-    await base44.entities.UmblerTalkLog.create({
+    await base44.asServiceRole.entities.UmblerTalkLog.create({
       audio1_name,
       phone: customerPhone,
       status: "chatbot_started_and_preview_sent",
@@ -237,6 +242,10 @@ export default async function(req) {
       error_message: "",
     });
 
+    if (job_id) {
+      try { await base44.asServiceRole.entities.ProcessingJob.update(job_id, { status: "completed" }); } catch {}
+    }
+
     return Response.json({
       success: true,
       phone: customerPhone,
@@ -244,6 +253,12 @@ export default async function(req) {
       logs,
     });
   } catch (error) {
+    if (job_id) {
+      try {
+        const b = createClientFromRequest(req);
+        await b.asServiceRole.entities.ProcessingJob.update(job_id, { status: "failed", error_message: error.message });
+      } catch {}
+    }
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

@@ -1,0 +1,58 @@
+{
+  "name": "ProcessingJob",
+  "type": "object",
+  "properties": {
+    "audio1_name": {
+      "type": "string",
+      "description": "Nome do arquivo do \u00c1udio 1 (usado para extrair telefone e nomear resultados)"
+    },
+    "audio1_file_uri": {
+      "type": "string",
+      "description": "URI do \u00c1udio 1 no storage privado"
+    },
+    "audio2_file_uri": {
+      "type": "string",
+      "description": "URI do \u00c1udio 2 no storage privado"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "isolating_1",
+        "isolating_2",
+        "processing",
+        "sending",
+        "completed",
+        "failed"
+      ],
+      "default": "pending",
+      "description": "Status do processamento"
+    },
+    "vocal1_uri": {
+      "type": "string",
+      "description": "URI do vocal isolado do \u00c1udio 1 no storage privado"
+    },
+    "instrumental_uri": {
+      "type": "string",
+      "description": "URI do instrumental isolado do \u00c1udio 1 no storage privado"
+    },
+    "vocal2_uri": {
+      "type": "string",
+      "description": "URI do vocal isolado do \u00c1udio 2 no storage privado"
+    },
+    "result_url": {
+      "type": "string",
+      "description": "URL assinada do resultado final (mix sincronizada)"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Mensagem de erro se houver falha"
+    }
+  },
+  "required": [
+    "audio1_name",
+    "audio1_file_uri",
+    "audio2_file_uri",
+    "status"
+  ]
+}
