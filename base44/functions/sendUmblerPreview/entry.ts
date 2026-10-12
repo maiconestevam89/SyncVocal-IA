@@ -55,20 +55,30 @@ export default async function(req) {
     const botId = secrets.get("UMBLER_TALK_BOT_ID");
     const triggerName = secrets.get("UMBLER_TALK_TRIGGER_NAME");
 
+    // Diagnóstico: mostra se cada secret está populado e seu tamanho (sem expor o valor)
+    const debug = {
+      apiToken: { set: !!apiToken, length: apiToken?.length || 0 },
+      orgId: { set: !!orgId, length: orgId?.length || 0 },
+      channelPhone: { set: !!channelPhone, length: channelPhone?.length || 0, preview: channelPhone ? channelPhone.slice(0, 3) + "..." + channelPhone.slice(-4) : "" },
+      botId: { set: !!botId, length: botId?.length || 0 },
+      triggerName: { set: !!triggerName, length: triggerName?.length || 0 },
+    };
+
     if (!apiToken || !orgId || !channelPhone || !botId || !triggerName) {
-      return Response.json({ error: "Credenciais do Umbler Talk não configuradas nos secrets." }, { status: 500 });
+      return Response.json({ error: "Credenciais do Umbler Talk não configuradas nos secrets.", debug }, { status: 500 });
     }
 
-    const logs = { phone: customerPhone, step1: null, step2: null };
+    const logs = { phone: customerPhone, step1: null, step2: null, debug };
 
     // ETAPA 1: Iniciar o chatbot "Música pronta"
-    // No endpoint start-bot: toPhone = canal, fromPhone = contato (cliente)
+    // No endpoint start-bot, apesar da documentação dizer toPhone=canal, o comportamento
+    // real da API é o mesmo do endpoint de mensagens: toPhone = destino (cliente), fromPhone = origem (canal)
     const step1Body = {
       botId,
       organizationId: orgId,
       triggerName,
-      toPhone: channelPhone,
-      fromPhone: customerPhone,
+      toPhone: customerPhone,
+      fromPhone: channelPhone,
     };
 
     const step1Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
