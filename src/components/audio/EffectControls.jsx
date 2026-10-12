@@ -32,7 +32,6 @@ export default function EffectControls({ settings, onChange }) {
   const setReverb = (patch) => set({ reverb: { ...settings.reverb, ...patch } });
   const setDelay = (patch) => set({ delay: { ...settings.delay, ...patch } });
   const setComp = (patch) => set({ compressor: { ...settings.compressor, ...patch } });
-  const setAuto = (patch) => set({ autotune: { ...settings.autotune, ...patch } });
 
   return (
     <div className="space-y-6">
@@ -61,58 +60,6 @@ export default function EffectControls({ settings, onChange }) {
         <div className="flex items-center justify-between">
           <Label className="text-xs text-muted-foreground">Preservar tom da voz</Label>
           <Switch checked={settings.preservePitch} onCheckedChange={(v) => set({ preservePitch: v })} />
-        </div>
-      </div>
-
-      <div className="h-px bg-border" />
-
-      {/* Auto-Tune */}
-      <div className="space-y-4">
-        <h4 className="text-sm font-semibold">Afinação Automática</h4>
-        <p className="text-xs text-muted-foreground -mt-2">
-          Corrige a afinação da voz para a escala escolhida, preservando o timbre original.
-        </p>
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">Ativar afinação</Label>
-          <Switch checked={settings.autotune.enabled} onCheckedChange={(v) => setAuto({ enabled: v })} />
-        </div>
-        <Field
-          label="Intensidade"
-          value={Math.round(settings.autotune.amount * 100)}
-          suffix="%"
-          min={0}
-          max={100}
-          step={1}
-          disabled={!settings.autotune.enabled}
-          onChange={(v) => setAuto({ amount: v / 100 })}
-        />
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Escala</Label>
-          <select
-            value={settings.autotune.scale}
-            onChange={(e) => setAuto({ scale: e.target.value })}
-            disabled={!settings.autotune.enabled}
-            className="w-full rounded-md border border-input bg-card px-2 py-1.5 text-xs"
-          >
-            <option value="chromatic">Cromática (todos os sons)</option>
-            <option value="major">Escala maior</option>
-            <option value="minor">Escala menor</option>
-            <option value="majorPentatonic">Pentatônica maior</option>
-            <option value="minorPentatonic">Pentatônica menor</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Tonalidade (root)</Label>
-          <select
-            value={settings.autotune.root}
-            onChange={(e) => setAuto({ root: parseInt(e.target.value) })}
-            disabled={!settings.autotune.enabled || settings.autotune.scale === "chromatic"}
-            className="w-full rounded-md border border-input bg-card px-2 py-1.5 text-xs"
-          >
-            {["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"].map((n, i) => (
-              <option key={i} value={i}>{n}</option>
-            ))}
-          </select>
         </div>
       </div>
 
