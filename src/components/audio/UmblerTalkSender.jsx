@@ -37,7 +37,7 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
     try {
       // 1. Construir a prévia (70s) e codificar em MP3
       const preview = buildPreviewBuffer(mixed);
-      const blob = audioBufferToMp3Blob(preview, 192);
+      const blob = await audioBufferToMp3Blob(preview, 192);
       const file = new File([blob], "preview.mp3", { type: "audio/mpeg" });
 
       // 2. Upload para storage privado (stored privately)

@@ -8,7 +8,7 @@ import { audioBufferToMp3Blob } from "@/lib/mp3Encoder";
 export default function ResultPanel({ renderedBuffer, onReset }) {
   const [busy, setBusy] = useState(null);
 
-  const download = (format) => {
+  const download = async (format) => {
     setBusy(format);
     try {
       let blob;
@@ -17,7 +17,7 @@ export default function ResultPanel({ renderedBuffer, onReset }) {
         blob = audioBufferToWavBlob(renderedBuffer);
         name = "vocal-sincronizado.wav";
       } else {
-        blob = audioBufferToMp3Blob(renderedBuffer, 192);
+        blob = await audioBufferToMp3Blob(renderedBuffer, 192);
         name = "vocal-sincronizado.mp3";
       }
       const url = URL.createObjectURL(blob);

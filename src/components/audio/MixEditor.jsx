@@ -176,7 +176,7 @@ export default function MixEditor({ initialBuffer, initialLabel, instrumentalBuf
       const mixed = await renderMultiTrack(tracks);
       let blob, name;
       if (format === "wav") { blob = audioBufferToWavBlob(mixed); name = "mixagem.wav"; }
-      else { blob = audioBufferToMp3Blob(mixed, 192); name = "mixagem.mp3"; }
+      else { blob = await audioBufferToMp3Blob(mixed, 192); name = "mixagem.mp3"; }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = name; a.click();

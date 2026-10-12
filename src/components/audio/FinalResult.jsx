@@ -66,7 +66,7 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceNam
     try {
       let blob, name;
       if (format === "wav") { blob = audioBufferToWavBlob(mixed); name = `${baseName}.wav`; }
-      else { blob = audioBufferToMp3Blob(mixed, 192); name = `${baseName}.mp3`; }
+      else { blob = await audioBufferToMp3Blob(mixed, 192); name = `${baseName}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${mixed.duration.toFixed(1)}s)`);
     } catch (e) {
@@ -82,7 +82,7 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceNam
     try {
       let blob, name;
       if (format === "wav") { blob = audioBufferToWavBlob(instrumentalBuffer); name = `${playbackBase}.wav`; }
-      else { blob = audioBufferToMp3Blob(instrumentalBuffer, 192); name = `${playbackBase}.mp3`; }
+      else { blob = await audioBufferToMp3Blob(instrumentalBuffer, 192); name = `${playbackBase}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${instrumentalBuffer.duration.toFixed(1)}s)`);
     } catch (e) {
@@ -118,7 +118,7 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceNam
       const preview = buildPreviewBuffer(mixed);
       let blob, name;
       if (format === "wav") { blob = audioBufferToWavBlob(preview); name = `${previewBase}.wav`; }
-      else { blob = audioBufferToMp3Blob(preview, 192); name = `${previewBase}.mp3`; }
+      else { blob = await audioBufferToMp3Blob(preview, 192); name = `${previewBase}.mp3`; }
       downloadBlob(blob, name);
       setExportResult(`${name} pronto (${preview.duration.toFixed(1)}s)`);
     } catch (e) {
