@@ -6,8 +6,9 @@ import { decodeAudioFile } from "@/lib/decodeAudio";
 import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 import { audioBufferToMp3Blob } from "@/lib/mp3Encoder";
 
-export default function ProcessingResult({ resultUrl, sourceName, onReset }) {
+export default function ProcessingResult({ resultUrl, playbackUrl, sourceName, onReset }) {
   const [buffer, setBuffer] = useState(null);
+  const [playbackBuffer, setPlaybackBuffer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
@@ -24,6 +25,19 @@ export default function ProcessingResult({ resultUrl, sourceName, onReset }) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [resultUrl]);
+
+  // Load playback (instrumental) lazily on first request
+  const loadPlayback = async () => {
+    if (playbackBuffer || !playbackUrl) return;
+    try {
+      const res = await fetch(playbackUrl);
+      const blob = await res.blob();
+      const buf = await decodeAudioFile(new File([blob], "playback.wav", { type: "audio/wav" }));
+      setPlaybackBuffer(buf);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   const downloadBlob = (blob, name) => {
     const url = URL.createObjectURL(blob);
@@ -42,9 +56,19 @@ export default function ProcessingResult({ resultUrl, sourceName, onReset }) {
       if (format === "wav") {
         blob = audioBufferToWavBlob(buffer);
         name = `${baseName}.wav`;
-      } else {
+      } else if (format === "mp3") {
         blob = await audioBufferToMp3Blob(buffer, 192);
         name = `${baseName}.mp3`;
+      } else if (format === "playback-wav") {
+        if (!playbackBuffer) await loadPlayback();
+        if (!playbackBuffer) return;
+        blob = audioBufferToWavBlob(playbackBuffer);
+        name = `${baseName}_playback.wav`;
+      } else if (format === "playback-mp3") {
+        if (!playbackBuffer) await loadPlayback();
+        if (!playbackBuffer) return;
+        blob = await audioBufferToMp3Blob(playbackBuffer, 192);
+        name = `${baseName}_playback.mp3`;
       }
       downloadBlob(blob, name);
     } catch (e) {
@@ -88,16 +112,35 @@ export default function ProcessingResult({ resultUrl, sourceName, onReset }) {
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Button size="lg" variant="outline" onClick={() => doExport("wav")} disabled={!!busy} className="h-12 flex-1">
-          {busy === "wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
-          Baixar WAV
-        </Button>
-        <Button size="lg" onClick={() => doExport("mp3")} disabled={!!busy} className="h-12 flex-1">
-          {busy === "mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
-          Baixar MP3
-        </Button>
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Resultado final</h3>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Button size="lg" variant="outline" onClick={() => doExport("wav")} disabled={!!busy} className="h-12 flex-1">
+            {busy === "wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+            Baixar WAV
+          </Button>
+          <Button size="lg" onClick={() => doExport("mp3")} disabled={!!busy} className="h-12 flex-1">
+            {busy === "mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+            Baixar MP3
+          </Button>
+        </div>
       </div>
+
+      {playbackUrl && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Playback (instrumental)</h3>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Button size="lg" variant="outline" onClick={() => doExport("playback-wav")} disabled={!!busy} className="h-12 flex-1">
+              {busy === "playback-wav" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+              Baixar Playback WAV
+            </Button>
+            <Button size="lg" variant="outline" onClick={() => doExport("playback-mp3")} disabled={!!busy} className="h-12 flex-1">
+              {busy === "playback-mp3" ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Download className="mr-2 h-5 w-5" />}
+              Baixar Playback MP3
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -44,6 +44,10 @@
       "type": "string",
       "description": "URL assinada do resultado final (mix sincronizada)"
     },
+    "playback_url": {
+      "type": "string",
+      "description": "URL assinada do playback (instrumental isolado)"
+    },
     "error_message": {
       "type": "string",
       "description": "Mensagem de erro se houver falha"

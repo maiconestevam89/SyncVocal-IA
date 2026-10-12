@@ -13,6 +13,7 @@ export default function Studio() {
   const [jobId, setJobId] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const [resultUrl, setResultUrl] = useState(null);
+  const [playbackUrl, setPlaybackUrl] = useState(null);
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -27,6 +28,7 @@ export default function Studio() {
         setJobStatus(job.status);
         if (job.status === "completed") {
           setResultUrl(job.result_url);
+          setPlaybackUrl(job.playback_url);
           setStage("result");
           return;
         }
@@ -79,6 +81,7 @@ export default function Studio() {
     setJobId(null);
     setJobStatus(null);
     setResultUrl(null);
+    setPlaybackUrl(null);
     setError(null);
   };
 
@@ -105,7 +108,7 @@ export default function Studio() {
 
       <main className="mx-auto max-w-6xl px-4 py-8">
         {stage === "result" ? (
-          <ProcessingResult resultUrl={resultUrl} sourceName={file1?.name} onReset={reset} />
+          <ProcessingResult resultUrl={resultUrl} playbackUrl={playbackUrl} sourceName={file1?.name} onReset={reset} />
         ) : (
           <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
             <div className="space-y-6">
