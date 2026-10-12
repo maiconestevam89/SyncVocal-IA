@@ -26,38 +26,54 @@ export default async function(req) {
     if (!apiKey) return Response.json({ error: "KITS_API_KEY não configurada." }, { status: 500 });
 
     try {
-      // Update job status
+      console.log("[isolateVocalToStorage] step 1: updating job status");
       if (job_id) {
         await base44.asServiceRole.entities.ProcessingJob.update(job_id, {
           status: with_instrumental ? "isolating_1" : "isolating_2",
         });
       }
 
-      // Create signed URL and download input file
+      console.log("[isolateVocalToStorage] step 2: creating signed URL + downloading");
       const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri });
-      const fileBytes = await downloadAudio(signed_url);
-      const { ext, type: fileContentType, supported } = detectAudioFormat(fileBytes);
+      let audioBlob = await downloadAudio(signed_url);
+      console.log("[isolateVocalToStorage] downloaded blob size:", audioBlob.size);
+
+      const { ext, type: fileContentType, supported } = await detectAudioFormat(audioBlob);
+      console.log("[isolateVocalToStorage] step 3: format detected", ext, fileContentType, supported);
       if (!supported) {
         throw new Error(`Formato .${ext} não suportado pelo kits.ai. Use WAV, MP3, FLAC ou WebM.`);
       }
 
-      // Create + poll Kits.ai separation job
-      const kitsJobId = await createSeparationJob(apiKey, fileBytes, fileContentType, `input.${ext}`);
+      console.log("[isolateVocalToStorage] step 4: creating Kits.ai separation job");
+      const kitsJobId = await createSeparationJob(apiKey, audioBlob, fileContentType, `input.${ext}`);
+      console.log("[isolateVocalToStorage] kits job created:", kitsJobId);
+
+      // Release the input blob reference so it can be GC'd during the long poll
+      audioBlob = null;
+
+      console.log("[isolateVocalToStorage] step 5: polling Kits.ai job");
       const result = await pollSeparationJob(apiKey, kitsJobId);
+      console.log("[isolateVocalToStorage] kits job completed, status:", result?.status);
+
       const { vocalUrl, instrumentalUrl } = extractResultUrls(result, with_instrumental);
+      console.log("[isolateVocalToStorage] step 6: downloading isolated vocal");
 
-      // Download + upload isolated vocal (prefer lossless WAV from Kits)
-      const vocalBytes = await downloadAudio(vocalUrl);
-      const vocalFile = new File([new Blob([vocalBytes])], "vocal.wav", { type: "audio/wav" });
+      const vocalBlob = await downloadAudio(vocalUrl);
+      console.log("[isolateVocalToStorage] vocal blob size:", vocalBlob.size);
+      const vocalFile = new File([vocalBlob], "vocal.wav", { type: "audio/wav" });
+      console.log("[isolateVocalToStorage] step 7: uploading vocal to storage");
       const { file_uri: vocal_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: vocalFile });
+      console.log("[isolateVocalToStorage] vocal uploaded:", vocal_uri);
 
-      // Download + upload instrumental if requested
       let instrumental_uri = null;
       if (with_instrumental && instrumentalUrl) {
-        const instBytes = await downloadAudio(instrumentalUrl);
-        const instFile = new File([new Blob([instBytes])], "instrumental.wav", { type: "audio/wav" });
+        console.log("[isolateVocalToStorage] step 8: downloading + uploading instrumental");
+        const instBlob = await downloadAudio(instrumentalUrl);
+        console.log("[isolateVocalToStorage] instrumental blob size:", instBlob.size);
+        const instFile = new File([instBlob], "instrumental.wav", { type: "audio/wav" });
         const { file_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: instFile });
         instrumental_uri = file_uri;
+        console.log("[isolateVocalToStorage] instrumental uploaded:", instrumental_uri);
       }
 
       // Update job with URIs

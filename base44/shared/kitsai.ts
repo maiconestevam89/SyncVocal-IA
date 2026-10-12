@@ -1,6 +1,10 @@
 // Shared Kits.ai vocal separation logic.
 // Extracted from isolateVocal/entry.ts so both the streaming function
 // and the storage-saving function can use the same code.
+// Uses Blob throughout to avoid memory-hungry ArrayBuffer copies (the
+// Deno worker has a tight memory ceiling — downloading a large audio
+// file as ArrayBuffer and then wrapping it in a new Blob doubles the
+// footprint and triggers "exceededMemory" crashes).
 
 const KITS_BASE = "https://arpeggi.io/api/kits/v1";
 const POLL_INTERVAL_MS = 3000;
@@ -8,11 +12,11 @@ const POLL_TIMEOUT_MS = 180000; // 3 min ceiling for the separation job
 const RATE_LIMIT_WAIT_MS = 65000; // wait just over 1 min between 429 retries
 const MAX_CREATE_ATTEMPTS = 2;
 
-// Detect audio format from file magic bytes so we send Kits.ai the correct
-// content-type (signed storage URLs often return application/octet-stream,
-// which Kits rejects with 422). Kits supports wav, webm, mp3, flac.
-export function detectAudioFormat(bytes) {
-  const v = new Uint8Array(bytes);
+// Detect audio format from the first 12 bytes of a Blob.
+// Only slices the header — does NOT load the entire file into memory.
+// Kits supports wav, webm, mp3, flac.
+export async function detectAudioFormat(blob) {
+  const v = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
   if (v.length < 12) return { ext: "mp3", type: "audio/mpeg", supported: true };
   if (v[0] === 0x52 && v[1] === 0x49 && v[2] === 0x46 && v[3] === 0x46 &&
       v[8] === 0x57 && v[9] === 0x41 && v[10] === 0x56 && v[11] === 0x45)
@@ -33,9 +37,11 @@ export function detectAudioFormat(bytes) {
 }
 
 // Create a Kits.ai separation job, retrying once on rate-limit (429).
-export async function createSeparationJob(apiKey, fileBytes, contentType, filename) {
+// Accepts a Blob so the file data is streamed without extra copies.
+export async function createSeparationJob(apiKey, audioBlob, contentType, filename) {
   const form = new FormData();
-  form.append("inputFile", new Blob([fileBytes], { type: contentType }), filename);
+  // slice() references the same underlying data without copying; new Blob([blob]) may copy
+  form.append("inputFile", audioBlob.slice(0, audioBlob.size, contentType), filename);
 
   let createRes;
   for (let attempt = 1; attempt <= MAX_CREATE_ATTEMPTS; attempt++) {
@@ -65,12 +71,30 @@ export async function createSeparationJob(apiKey, fileBytes, contentType, filena
   return job.id;
 }
 
+// Poll a Kits.ai separation job ONCE (no loop). Returns the current job state.
+// Used by checkKitsIsolation so each function call is short-lived — the workflow
+// handles retries via wait steps instead of a long-running poll loop.
+export async function pollSeparationJobOnce(apiKey, jobId) {
+  const pollRes = await fetch(`${KITS_BASE}/vocal-separations/${jobId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!pollRes.ok) {
+    const detail = await pollRes.text().catch(() => "");
+    throw new Error(`Kits (consultar job): ${pollRes.status} ${detail}`);
+  }
+  return await pollRes.json();
+}
+
 // Poll a Kits.ai separation job until it reaches a terminal state.
 export async function pollSeparationJob(apiKey, jobId) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let result;
+  let pollCount = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    pollCount++;
+    console.log(`[pollSeparationJob] poll #${pollCount} for job ${jobId}`);
     const pollRes = await fetch(`${KITS_BASE}/vocal-separations/${jobId}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(15000),
@@ -80,6 +104,7 @@ export async function pollSeparationJob(apiKey, jobId) {
       throw new Error(`Kits (consultar job): ${pollRes.status} ${detail}`);
     }
     result = await pollRes.json();
+    console.log(`[pollSeparationJob] poll #${pollCount} status: ${result?.status}`);
     if (["success", "error", "cancelled"].includes(result?.status)) break;
   }
   if (result?.status !== "success") {
@@ -108,9 +133,9 @@ export function extractResultUrls(result, withInstrumental) {
   return { vocalUrl, instrumentalUrl };
 }
 
-// Download audio bytes from a URL.
+// Download audio as a Blob (streamed, not buffered into an ArrayBuffer).
 export async function downloadAudio(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
   if (!res.ok) throw new Error(`Falha ao baixar áudio: ${res.status}`);
-  return res.arrayBuffer();
+  return res.blob();
 }

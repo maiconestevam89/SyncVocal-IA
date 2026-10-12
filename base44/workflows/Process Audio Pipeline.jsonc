@@ -1,6 +1,6 @@
 {
   "name": "Process Audio Pipeline",
-  "description": "Isola vocais (kits.ai), sincroniza, mixa e envia pr\u00e9via via WhatsApp automaticamente \u2014 roda no servidor sem depender do navegador",
+  "description": "Isola vocais (kits.ai), sincroniza, mixa e envia pr\u00e9via via WhatsApp \u2014 polling encadeado sem ciclos.",
   "trigger": {
     "config": {
       "trigger_type": "entity",
@@ -15,15 +15,15 @@
     "document": {
       "dsl": "1.0.0",
       "name": "process_audio_pipeline",
-      "version": "1.0",
+      "version": "3.0",
       "namespace": "base44"
     },
     "do": [
       {
-        "isolate1": {
+        "start1": {
           "call": "invoke_backend_function",
           "with": {
-            "function_name": "isolateVocalToStorage",
+            "function_name": "startKitsIsolation",
             "args": {
               "file_uri": "${ .trigger.data.audio1_file_uri }",
               "with_instrumental": true,
@@ -32,15 +32,15 @@
           },
           "then": "rate_limit_wait",
           "x-base44": {
-            "title": "Isolar \u00c1udio 1",
-            "description": "Voz + instrumental no kits.ai"
+            "title": "Iniciar \u00c1udio 1",
+            "description": "Cria job no kits.ai"
           }
         }
       },
       {
         "rate_limit_wait": {
           "wait": "PT65S",
-          "then": "isolate2",
+          "then": "start2",
           "x-base44": {
             "title": "Aguardar rate limit",
             "description": "65s entre envios"
@@ -48,20 +48,574 @@
         }
       },
       {
-        "isolate2": {
+        "start2": {
           "call": "invoke_backend_function",
           "with": {
-            "function_name": "isolateVocalToStorage",
+            "function_name": "startKitsIsolation",
             "args": {
               "file_uri": "${ .trigger.data.audio2_file_uri }",
               "with_instrumental": false,
               "job_id": "${ .trigger.entity_id }"
             }
           },
-          "then": "process",
+          "then": "initial_wait",
           "x-base44": {
-            "title": "Isolar \u00c1udio 2",
-            "description": "Voz do cliente no kits.ai"
+            "title": "Iniciar \u00c1udio 2",
+            "description": "Cria job no kits.ai"
+          }
+        }
+      },
+      {
+        "initial_wait": {
+          "wait": "PT30S",
+          "then": "check1a",
+          "x-base44": {
+            "title": "Aguardar processamento",
+            "description": "30s para o kits.ai"
+          }
+        }
+      },
+      {
+        "check1a": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1a_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 1"
+          }
+        }
+      },
+      {
+        "check1a_sw": {
+          "switch": [
+            {
+              "when": "${ .check1a.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait1a"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "wait1a": {
+          "wait": "PT15S",
+          "then": "check1b",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check1b": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1b_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 2"
+          }
+        }
+      },
+      {
+        "check1b_sw": {
+          "switch": [
+            {
+              "when": "${ .check1b.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait1b"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "wait1b": {
+          "wait": "PT15S",
+          "then": "check1c",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check1c": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1c_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 3"
+          }
+        }
+      },
+      {
+        "check1c_sw": {
+          "switch": [
+            {
+              "when": "${ .check1c.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait1c"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "wait1c": {
+          "wait": "PT15S",
+          "then": "check1d",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check1d": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1d_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 4"
+          }
+        }
+      },
+      {
+        "check1d_sw": {
+          "switch": [
+            {
+              "when": "${ .check1d.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait1d"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "wait1d": {
+          "wait": "PT15S",
+          "then": "check1e",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check1e": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1e_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 5"
+          }
+        }
+      },
+      {
+        "check1e_sw": {
+          "switch": [
+            {
+              "when": "${ .check1e.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait1e"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "wait1e": {
+          "wait": "PT15S",
+          "then": "check1f",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check1f": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start1.kits_job_id }",
+              "with_instrumental": true,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check1f_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 1",
+            "description": "Tentativa 6"
+          }
+        }
+      },
+      {
+        "check1f_sw": {
+          "switch": [
+            {
+              "when": "${ .check1f.done == true }",
+              "then": "check2a"
+            },
+            {
+              "when": "${ true }",
+              "then": "fail1"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 1 pronto?"
+          }
+        }
+      },
+      {
+        "fail1": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "markJobFailed",
+            "args": {
+              "job_id": "${ .trigger.entity_id }",
+              "error_message": "Tempo limite: isolamento do \u00c1udio 1 n\u00e3o concluiu no kits.ai."
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Falhar job",
+            "description": "\u00c1udio 1 excedeu limite"
+          }
+        }
+      },
+      {
+        "check2a": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2a_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 1"
+          }
+        }
+      },
+      {
+        "check2a_sw": {
+          "switch": [
+            {
+              "when": "${ .check2a.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait2a"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "wait2a": {
+          "wait": "PT15S",
+          "then": "check2b",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check2b": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2b_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 2"
+          }
+        }
+      },
+      {
+        "check2b_sw": {
+          "switch": [
+            {
+              "when": "${ .check2b.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait2b"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "wait2b": {
+          "wait": "PT15S",
+          "then": "check2c",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check2c": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2c_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 3"
+          }
+        }
+      },
+      {
+        "check2c_sw": {
+          "switch": [
+            {
+              "when": "${ .check2c.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait2c"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "wait2c": {
+          "wait": "PT15S",
+          "then": "check2d",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check2d": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2d_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 4"
+          }
+        }
+      },
+      {
+        "check2d_sw": {
+          "switch": [
+            {
+              "when": "${ .check2d.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait2d"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "wait2d": {
+          "wait": "PT15S",
+          "then": "check2e",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check2e": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2e_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 5"
+          }
+        }
+      },
+      {
+        "check2e_sw": {
+          "switch": [
+            {
+              "when": "${ .check2e.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "wait2e"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "wait2e": {
+          "wait": "PT15S",
+          "then": "check2f",
+          "x-base44": {
+            "title": "Aguardar 15s"
+          }
+        }
+      },
+      {
+        "check2f": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "checkKitsIsolation",
+            "args": {
+              "kits_job_id": "${ .start2.kits_job_id }",
+              "with_instrumental": false,
+              "job_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check2f_sw",
+          "x-base44": {
+            "title": "Verificar \u00c1udio 2",
+            "description": "Tentativa 6"
+          }
+        }
+      },
+      {
+        "check2f_sw": {
+          "switch": [
+            {
+              "when": "${ .check2f.done == true }",
+              "then": "process"
+            },
+            {
+              "when": "${ true }",
+              "then": "fail2"
+            }
+          ],
+          "x-base44": {
+            "title": "\u00c1udio 2 pronto?"
+          }
+        }
+      },
+      {
+        "fail2": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "markJobFailed",
+            "args": {
+              "job_id": "${ .trigger.entity_id }",
+              "error_message": "Tempo limite: isolamento do \u00c1udio 2 n\u00e3o concluiu no kits.ai."
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Falhar job",
+            "description": "\u00c1udio 2 excedeu limite"
           }
         }
       },
@@ -72,9 +626,9 @@
             "function_name": "processAndSync",
             "args": {
               "job_id": "${ .trigger.entity_id }",
-              "vocal1_uri": "${ .isolate1.vocal_uri }",
-              "instrumental_uri": "${ .isolate1.instrumental_uri }",
-              "vocal2_uri": "${ .isolate2.vocal_uri }"
+              "vocal1_uri": "${ .check1a.vocal_uri // .check1b.vocal_uri // .check1c.vocal_uri // .check1d.vocal_uri // .check1e.vocal_uri // .check1f.vocal_uri }",
+              "instrumental_uri": "${ .check1a.instrumental_uri // .check1b.instrumental_uri // .check1c.instrumental_uri // .check1d.instrumental_uri // .check1e.instrumental_uri // .check1f.instrumental_uri }",
+              "vocal2_uri": "${ .check2a.vocal_uri // .check2b.vocal_uri // .check2c.vocal_uri // .check2d.vocal_uri // .check2e.vocal_uri // .check2f.vocal_uri }"
             }
           },
           "then": "send",
