@@ -66,14 +66,15 @@ export default async function(req) {
     const logs = { phone: customerPhone, step1: null, step2: null, debug };
 
     // ETAPA 1: Iniciar o chatbot "Música pronta"
-    // No endpoint start-bot, a semântica é OPOSTA à do endpoint de mensagens:
-    // toPhone = canal (empresa), fromPhone = contato (cliente) — conforme documentação oficial.
+    // Apesar da documentação dizer toPhone=canal, o comportamento real da API é o mesmo
+    // do endpoint de mensagens: toPhone = destino (cliente), fromPhone = origem (canal).
+    // Confirmado pelos logs: com toPhone=customerPhone a Etapa 1 retorna 200.
     const step1Body = {
       botId,
       organizationId: orgId,
       triggerName,
-      toPhone: channelPhone,
-      fromPhone: customerPhone,
+      toPhone: customerPhone,
+      fromPhone: channelPhone,
     };
 
     const step1Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
