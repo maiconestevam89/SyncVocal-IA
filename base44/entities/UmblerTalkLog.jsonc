@@ -1,0 +1,50 @@
+{
+  "name": "UmblerTalkLog",
+  "type": "object",
+  "properties": {
+    "audio1_name": {
+      "type": "string",
+      "description": "Nome do arquivo do \u00c1udio 1 usado para extrair o telefone"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Telefone do cliente em formato E.164 (ex: +5511999999999)"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "chatbot_started",
+        "chatbot_started_and_preview_sent",
+        "failed"
+      ],
+      "default": "pending",
+      "description": "Status do disparo no Umbler Talk"
+    },
+    "step1_http_status": {
+      "type": "number",
+      "description": "HTTP status retornado pela Etapa 1 (start-bot)"
+    },
+    "step1_response": {
+      "type": "string",
+      "description": "Resposta JSON da Etapa 1 (truncada)"
+    },
+    "step2_http_status": {
+      "type": "number",
+      "description": "HTTP status retornado pela Etapa 2 (envio de m\u00eddia)"
+    },
+    "step2_response": {
+      "type": "string",
+      "description": "Resposta JSON da Etapa 2 (truncada)"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Mensagem de erro se houver falha"
+    }
+  },
+  "required": [
+    "audio1_name",
+    "phone",
+    "status"
+  ]
+}

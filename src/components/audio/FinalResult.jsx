@@ -6,6 +6,7 @@ import { autoMatchGains } from "@/lib/loudness";
 import { audioBufferToWavBlob } from "@/lib/wavEncoder";
 import { audioBufferToMp3Blob } from "@/lib/mp3Encoder";
 import WaveformPlayer from "@/components/audio/WaveformPlayer";
+import UmblerTalkSender from "@/components/audio/UmblerTalkSender";
 
 // Renders the final mix automatically (vocal + instrumental with matched
 // volumes) and exposes only a player + download buttons. No manual mixing.
@@ -202,6 +203,7 @@ export default function FinalResult({ vocalBuffer, instrumentalBuffer, sourceNam
           </div>
         )}
       </div>
+      <UmblerTalkSender mixed={mixed} sourceName={sourceName} />
       {exportResult && <p className="text-sm text-muted-foreground">{exportResult}</p>}
     </div>
   );
