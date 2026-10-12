@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { AudioLines, Sparkles, Clock, Wand2, Loader2, Check } from "lucide-react";
+import { AudioLines, Sparkles, Clock, Wand2 } from "lucide-react";
 import UploadZone from "@/components/audio/UploadZone";
 import WaveformPlayer from "@/components/audio/WaveformPlayer";
 import EffectControls from "@/components/audio/EffectControls";
@@ -10,7 +10,6 @@ import VocalIsolator from "@/components/audio/VocalIsolator";
 import ManualRepair from "@/components/audio/ManualRepair";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
-import { detectInstruments } from "@/lib/dsp/instrumentDetect";
 
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
@@ -39,9 +38,6 @@ export default function Studio() {
   const [activeStep, setActiveStep] = useState(null);
   const [rendered, setRendered] = useState(null);
   const [error, setError] = useState(null);
-  const [instrumentsDetected2, setInstrumentsDetected2] = useState(null); // null | true | false
-  const [checkingInstruments2, setCheckingInstruments2] = useState(false);
-  const autoProcessedRef = useRef(false);
 
   // Decode files as they arrive.
   useEffect(() => {
@@ -75,24 +71,7 @@ export default function Studio() {
   useEffect(() => {
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
-    setInstrumentsDetected2(null);
   }, [file2]);
-
-  // Detect instruments in Audio 2 when it's decoded. If no instruments are
-  // found, skip the Kits.ai isolation and use the raw audio directly.
-  useEffect(() => {
-    if (!buffer2) {
-      setInstrumentsDetected2(null);
-      return;
-    }
-    setCheckingInstruments2(true);
-    const id = setTimeout(() => {
-      const has = detectInstruments(buffer2);
-      setInstrumentsDetected2(has);
-      setCheckingInstruments2(false);
-    }, 50);
-    return () => clearTimeout(id);
-  }, [buffer2]);
 
   // Reset the repaired vocal whenever the isolated vocal changes.
   useEffect(() => {
@@ -152,29 +131,15 @@ export default function Studio() {
     setInstrumentalBuffer1(null);
     setIsolatedBuffer2(null);
     setRepairedBuffer2(null);
-    setInstrumentsDetected2(null);
-    setCheckingInstruments2(false);
-    autoProcessedRef.current = false;
     setError(null);
   };
 
   // Ready when the isolated reference AND the real instrumental are available
   // (both come from isolating Audio 1), plus a vocal to sync.
-  const ready = isolatedBuffer1 && instrumentalBuffer1 &&
-    (instrumentsDetected2 === false || isolatedBuffer2) &&
-    stage === "upload";
+  const ready = isolatedBuffer1 && instrumentalBuffer1 && isolatedBuffer2 && stage === "upload";
 
   // The vocal that's currently "active" for preview / processing.
   const activeVocal2 = repairedBuffer2 || isolatedBuffer2 || buffer2;
-
-  // Auto-process as soon as everything is ready (no manual button click needed).
-  useEffect(() => {
-    if (ready && !autoProcessedRef.current) {
-      autoProcessedRef.current = true;
-      process();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -215,10 +180,10 @@ export default function Studio() {
                   Sincronize seu vocal com uma referência de IA
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Envie a faixa completa (voz + instrumental) no Áudio 1 e a sua voz no
-                  Áudio 2. O sistema isola a voz do Áudio 1 no kits.ai e verifica se o Áudio 2
-                  contém instrumentos — se sim, isola a voz; se não, usa o áudio original.
-                  Depois processa e sincroniza tudo automaticamente.
+                  Envie a faixa completa (voz + instrumental) no Áudio 1 e a sua voz humana no
+                  Áudio 2. O kits.ai isola automaticamente a voz de ambos — a voz isolada do
+                  Áudio 1 vira a referência de sincronização. O resultado final junta a sua
+                  voz sincronizada com o instrumental original do Áudio 1 em um único áudio.
                 </p>
               </div>
 
@@ -256,13 +221,7 @@ export default function Studio() {
                   />
                 </div>
               )}
-              {file2 && checkingInstruments2 && (
-                <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                  <span className="truncate">Analisando áudio para detectar instrumentos…</span>
-                </div>
-              )}
-              {file2 && instrumentsDetected2 === true && (
+              {file2 && (
                 <div className="space-y-3">
                   <VocalIsolator
                     file={file2}
@@ -277,12 +236,6 @@ export default function Studio() {
                       onRepaired={setRepairedBuffer2}
                     />
                   )}
-                </div>
-              )}
-              {file2 && instrumentsDetected2 === false && (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  <Check className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Nenhum instrumento detectado — usando o áudio original do cliente.</span>
                 </div>
               )}
               {buffer2 && (
