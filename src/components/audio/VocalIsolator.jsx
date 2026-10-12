@@ -3,6 +3,21 @@ import { Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { base44 } from "@/api/base44Client";
 import { fetchAudioFromFunction } from "@/lib/fetchAudioFromFunction";
+import { decodeAudioFile } from "@/lib/audioEngine";
+import { audioBufferToWavBlob } from "@/lib/wavEncoder";
+
+// Kits.ai does not accept OGG/OGA files. Convert them to WAV in the browser
+// before uploading so the rest of the pipeline works unchanged.
+async function ensureKitsCompatible(file, onStatus) {
+  const name = file.name.toLowerCase();
+  const isOgg = name.endsWith(".ogg") || name.endsWith(".oga") || file.type === "audio/ogg";
+  if (!isOgg) return file;
+  onStatus?.("converting");
+  const buffer = await decodeAudioFile(file);
+  const wavBlob = audioBufferToWavBlob(buffer);
+  const wavName = file.name.replace(/\.(ogg|oga)$/i, ".wav");
+  return new File([wavBlob], wavName, { type: "audio/wav" });
+}
 
 // Sends the uploaded audio file to the Kits.ai vocal isolation backend
 // function and returns the decoded isolated-vocal AudioBuffer. When
@@ -10,10 +25,11 @@ import { fetchAudioFromFunction } from "@/lib/fetchAudioFromFunction";
 // (original track with the vocal removed) and this helper resolves to
 // { vocal, instrumental } instead of a bare AudioBuffer.
 export async function isolateVocal(file, onStatus, { withInstrumental = false } = {}) {
-  // 1. Upload to private storage so the backend function can fetch the bytes
-  //    by file_uri — the SDK invoke() payload must be JSON-serializable.
+  // 1. Convert OGG → WAV if needed (Kits.ai doesn't accept OGG), then upload
+  //    to private storage so the backend function can fetch the bytes.
   onStatus?.("uploading");
-  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+  const uploadFile = await ensureKitsCompatible(file, onStatus);
+  const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file: uploadFile });
   // Create a signed URL so the backend function can fetch the private file.
   const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri });
 
@@ -41,7 +57,8 @@ export default function VocalIsolator({ file, onIsolated, onInstrumental, isolat
     setMessage("Enviando para o kits.ai…");
     try {
       const result = await isolateVocal(file, (s) => {
-        if (s === "processing") setMessage("Isolando voz no kits.ai… (pode levar até 2 min se o limite de envio for atingido)");
+        if (s === "converting") setMessage("Convertendo OGG para WAV…");
+        else if (s === "processing") setMessage("Isolando voz no kits.ai… (pode levar até 2 min se o limite de envio for atingido)");
         else if (s === "decoding") setMessage("Decodificando vocal isolado…");
       }, { withInstrumental });
 
