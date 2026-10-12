@@ -121,8 +121,8 @@ export default async function(req) {
     // Executada EXCLUSIVAMENTE após a confirmação de sucesso da Etapa 1.
     // No endpoint simplified: ToPhone = destino (cliente), FromPhone = origem (canal)
 
-    // Pausa de 8s para o chatbot enviar a saudação antes do áudio chegar
-    await new Promise((r) => setTimeout(r, 8000));
+    // Pausa de 15s para o chatbot enviar todas as mensagens de saudação antes do áudio chegar
+    await new Promise((r) => setTimeout(r, 15000));
 
     const audioRes = await fetch(file_url, { signal: AbortSignal.timeout(30000) });
     if (!audioRes.ok) {
@@ -185,6 +185,9 @@ export default async function(req) {
 
     // ETAPA 3: Disparar o chatbot "Pendente de pagamento" após o envio da prévia
     // Mesma lógica da Etapa 1: toPhone = cliente, fromPhone = canal.
+    // Pausa de 10s para o cliente receber e ouvir a prévia antes do bot de pagamento
+    await new Promise((r) => setTimeout(r, 10000));
+
     const paymentBotId = "aaRxg5RS5vxsTe8j";
     const paymentTriggerName = "Pendente de pagamento";
 
