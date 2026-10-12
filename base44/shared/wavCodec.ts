@@ -4,7 +4,8 @@
 // Decode a WAV ArrayBuffer into { channels: Float32Array[], sampleRate, duration }.
 // Supports 16-bit PCM, 24-bit PCM, and 32-bit float WAV files.
 export function decodeWav(arrayBuffer) {
-  const view = new DataView(arrayBuffer);
+  const ab = arrayBuffer instanceof ArrayBuffer ? arrayBuffer : new Uint8Array(arrayBuffer).buffer;
+  const view = new DataView(ab);
 
   // Verify RIFF header
   const riff = view.getUint32(0, false);
@@ -85,7 +86,9 @@ export function decodeWav(arrayBuffer) {
 // a single downsampled mono buffer (~26 MB at 22050 Hz). Critical for staying
 // within the Deno worker's ~128 MB memory limit.
 export function decodeWavMonoAtRate(arrayBuffer, targetRate) {
-  const view = new DataView(arrayBuffer);
+  // Ensure we have a proper ArrayBuffer (Deno fetch can return Uint8Array)
+  const ab = arrayBuffer instanceof ArrayBuffer ? arrayBuffer : new Uint8Array(arrayBuffer).buffer;
+  const view = new DataView(ab);
 
   const riff = view.getUint32(0, false);
   if (riff !== 0x52494646) throw new Error("Não é um arquivo WAV válido (header RIFF ausente).");

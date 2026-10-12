@@ -34,7 +34,9 @@ const PROCESS_RATE = 22050;
 async function fetchArrayBuffer(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
   if (!res.ok) throw new Error(`Falha ao baixar áudio: ${res.status}`);
-  return res.arrayBuffer();
+  const buf = await res.arrayBuffer();
+  // Ensure we return a proper ArrayBuffer (Deno can return Uint8Array in some cases)
+  return buf instanceof ArrayBuffer ? buf : new Uint8Array(buf).buffer;
 }
 
 // Linear-interpolation resample between arbitrary sample rates (mono).
