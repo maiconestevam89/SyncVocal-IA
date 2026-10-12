@@ -3,25 +3,17 @@ import { secrets } from 'base44:runtime';
 
 const UTALK_BASE = "https://app-utalk.umbler.com/api";
 
-// Extrai o telefone do nome do arquivo buscando grupos contíguos de dígitos.
-// Isso evita que sufixos numéricos (ex: "FINAL01", "MUSICA09") sejam anexados ao número.
-// Regras por grupo: 10-11 dígitos → +55 + dígitos; 12-13 dígitos começando com 55 → + + dígitos.
-// Retorna o primeiro grupo válido em E.164, ou null se nenhum servir.
+// Extrai o telefone brasileiro do nome do arquivo, aceitando separadores (espaço, hífen, ponto,
+// parênteses) e ignorando o restante do texto (ex: "11 98803-2049 - MUSICA 01").
+// Formato: [+55] DDD (2 dígitos) + número (8 ou 9 dígitos, o 9º dígito é opcional).
+// Retorna o telefone em E.164 (+55DDDNÚMERO) ou null se não encontrar.
+const PHONE_REGEX = /(?<!\d)(?:\+?55[\s.\-]*)?\(?(\d{2})\)?[\s.\-]*(9?\d{4})[\s.\-]*(\d{4})(?!\d)/;
+
 function extractPhone(filename) {
-  const groups = (filename || "").match(/\d+/g);
-  if (!groups) return null;
-  for (const digits of groups) {
-    let phone;
-    if (digits.length === 10 || digits.length === 11) {
-      phone = "+55" + digits;
-    } else if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) {
-      phone = "+" + digits;
-    } else {
-      continue;
-    }
-    if (/^\+[1-9]\d{1,14}$/.test(phone)) return phone;
-  }
-  return null;
+  const m = (filename || "").match(PHONE_REGEX);
+  if (!m) return null;
+  const phone = "+55" + m[1] + m[2] + m[3];
+  return /^\+55\d{10,11}$/.test(phone) ? phone : null;
 }
 
 function truncate(obj, max = 2000) {
@@ -48,7 +40,7 @@ export default async function(req) {
       return Response.json({
         success: false,
         error: `Não foi possível extrair um telefone válido do nome "${audio1_name}". ` +
-               "Renomeie o Áudio 1 contendo apenas os dígitos do telefone (ex: 5511999999999.wav) e tente novamente.",
+               "O nome do Áudio 1 precisa conter o telefone com DDD (ex: 11 98803-2049 - MUSICA 01.mp3) e tente novamente.",
       }, { status: 400 });
     }
 
