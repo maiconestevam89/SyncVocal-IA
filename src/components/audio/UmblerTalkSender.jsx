@@ -29,22 +29,31 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
   const [result, setResult] = useState(null);
   const [logs, setLogs] = useState(null);
 
+  const extractErr = (e) =>
+    e?.data?.error?.message || e?.data?.error ||
+    (typeof e?.data?.message === "string" ? e.data.message : null) ||
+    e?.data?.detail || e?.message || "Erro inesperado.";
+
   const send = async () => {
     if (!mixed) return;
     setState("sending");
     setResult(null);
     setLogs(null);
+    let step = "preparo";
     try {
       // 1. Construir a prévia (70s) e codificar em MP3
+      step = "codificação MP3";
       const preview = buildPreviewBuffer(mixed);
       const blob = await audioBufferToMp3Blob(preview, 192);
       const file = new File([blob], "preview.mp3", { type: "audio/mpeg" });
 
       // 2. Upload para storage privado (stored privately)
+      step = "upload do arquivo";
       const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
       const { signed_url } = await base44.integrations.Core.CreateFileSignedUrl({ file_uri });
 
       // 3. Chamar a função backend para o fluxo de 2 etapas do Umbler Talk
+      step = "disparo no WhatsApp";
       const res = await base44.functions.invoke("sendUmblerPreview", {
         file_url: signed_url,
         audio1_name: sourceName || "",
@@ -62,7 +71,10 @@ export default function UmblerTalkSender({ mixed, sourceName }) {
       }
     } catch (e) {
       setState("error");
-      setResult(e?.data?.error || e?.data?.message || e?.message || "Erro inesperado.");
+      const detail = extractErr(e);
+      setResult(`Etapa "${step}": ${detail}`);
+      // Expõe o objeto completo do erro para diagnóstico
+      setLogs({ step, status: e?.status, code: e?.code, data: e?.data, message: e?.message });
     }
   };
 
