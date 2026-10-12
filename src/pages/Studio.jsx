@@ -10,6 +10,7 @@ import VocalIsolator from "@/components/audio/VocalIsolator";
 import ManualRepair from "@/components/audio/ManualRepair";
 import { decodeAudioFile, renderMix } from "@/lib/audioEngine";
 import { alignVocal } from "@/lib/align";
+import { applyAutoTune } from "@/lib/dsp/autotune";
 
 const DEFAULT_SETTINGS = {
   tempoRatio: 1,
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS = {
   reverb: { amount: 0, duration: 2, decay: 2 },
   delay: { time: 0.25, feedback: 0.3, amount: 0 },
   compressor: { threshold: -24, knee: 30, ratio: 4, attack: 0.003, release: 0.25 },
+  autotune: { enabled: true, amount: 0.7, scale: "chromatic", root: 0 },
 };
 
 export default function Studio() {
@@ -102,6 +104,15 @@ export default function Studio() {
 
       setActiveStep("sync");
       const aligned = await alignVocal(reference, vocal, settings);
+      setActiveStep("tune");
+      let tunedBuffer = aligned.buffer;
+      if (settings.autotune?.enabled && settings.autotune?.amount > 0) {
+        try {
+          tunedBuffer = await applyAutoTune(aligned.buffer, settings.autotune);
+        } catch (e) {
+          console.warn("Afinação falhou, usando vocal sem correção:", e);
+        }
+      }
       setActiveStep("effects");
       await new Promise((r) => setTimeout(r, 400));
       setActiveStep("render");
@@ -110,7 +121,7 @@ export default function Studio() {
       // instrumental, because that would leak the original voice into the
       // result. If isolation hasn't finished, we still render the vocal —
       // the MixEditor will add whatever instrumental is available.
-      const rendered = await renderMix(reference, aligned.buffer, settings, {
+      const rendered = await renderMix(reference, tunedBuffer, settings, {
         ...aligned,
         instrumentalBuffer: null,
       });

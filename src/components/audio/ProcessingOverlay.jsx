@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 const STEPS = [
   { key: "decode", label: "Carregando áudios" },
   { key: "sync", label: "Sincronização de tempo" },
+  { key: "tune", label: "Afinação automática" },
   { key: "effects", label: "Aplicação de efeitos" },
   { key: "render", label: "Renderização final" },
 ];
