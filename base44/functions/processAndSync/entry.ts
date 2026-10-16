@@ -185,7 +185,12 @@ export default async function(req) {
       const { signed_url: playback_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: instrumental_uri, expires_in: 3600 });
 
       if (job_id) {
-        await base44.asServiceRole.entities.ProcessingJob.update(job_id, { result_url, playback_url });
+        await base44.asServiceRole.entities.ProcessingJob.update(job_id, {
+          result_url,
+          playback_url,
+          preview_url,
+          status: "completed",
+        });
       }
 
       return Response.json({ result_url, preview_url, playback_url });
