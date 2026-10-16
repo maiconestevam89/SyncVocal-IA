@@ -119,8 +119,8 @@ export default function Studio() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   Envie a faixa completa (voz + instrumental) no Áudio 1 e a sua voz no
                   Áudio 2. O processamento é 100% automático e acontece no servidor:
-                  isolamento, sincronização, mixagem e envio da prévia no WhatsApp do
-                  cliente. Você pode fechar esta página que o fluxo continua rodando.
+                  isolamento, sincronização e mixagem. Você poderá ouvir o resultado,
+                  baixar a música na voz do cliente e enviar a prévia no WhatsApp quando desejar.
                 </p>
               </div>
 
@@ -169,8 +169,8 @@ export default function Studio() {
                   <li>1. Envie os dois áudios e clique em Processar.</li>
                   <li>2. O kits.ai isola as vozes de ambos os áudios.</li>
                   <li>3. O servidor alinha a sua voz à referência e mixa com o instrumental.</li>
-                  <li>4. A prévia de 1min10s é enviada no WhatsApp do cliente.</li>
-                  <li>5. O resultado fica disponível para download aqui.</li>
+                  <li>4. O resultado fica disponível para ouvir e baixar.</li>
+                  <li>5. Você pode enviar a prévia no WhatsApp com um clique.</li>
                 </ol>
                 <p className="mt-3 text-xs text-muted-foreground">
                   O processamento acontece no servidor. Você pode fechar esta página
