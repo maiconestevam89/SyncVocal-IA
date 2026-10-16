@@ -115,6 +115,9 @@ export async function findCustomerDriveFolder(
   const patterns = [
     formattedPhone,
     `${ddd} ${p1}-${p2}`,
+    `${p1}-${p2}`,
+    `(${ddd}) ${p1}-${p2}`,
+    `${ddd} ${rest}`,
     `${ddd}${rest}`,
     rest,
   ].filter(Boolean) as string[];
