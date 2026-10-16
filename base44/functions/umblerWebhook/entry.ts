@@ -7,7 +7,7 @@ export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
-      description: "Webhook do Umbler Talk para disparo da cobrança Asaas",
+      description: "Webhook do Umbler Talk para disparo da cobrança Asaas ao iniciar o bot 'Pendente de pagamento'",
     });
   }
 
@@ -33,6 +33,8 @@ export default async function(req: Request) {
     body?.text ||
     body?.Message?.Content ||
     body?.Message?.Text ||
+    body?.payload?.message?.text ||
+    body?.data?.message?.text ||
     body?.triggerName ||
     body?.botName ||
     body?.TriggerName ||
@@ -40,15 +42,24 @@ export default async function(req: Request) {
     ""
   ).toString();
 
+  const normalized = textContent
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // Mensagem inicial da execução do bot "Pendente de pagamento":
+  // "Para adquirir o playback ou colocar sua voz, conclua o pagamento com os dados abaixo:"
   const isTriggerMatch =
-    textContent.toLowerCase().includes("pagamento confirmado") ||
-    textContent.toLowerCase().includes("pendente de pagamento") ||
+    normalized.includes("para adquirir o playback ou colocar sua voz") ||
+    normalized.includes("conclua o pagamento com os dados abaixo") ||
+    normalized.includes("adquirir o playback") ||
+    normalized.includes("pendente de pagamento") ||
     body?.force === true;
 
   if (!isTriggerMatch) {
     return Response.json({
       ignored: true,
-      reason: "Mensagem ou evento não corresponde ao gatilho 'Pendente de pagamento' / 'Pagamento confirmado!'",
+      reason: "Mensagem ou evento não corresponde ao gatilho do bot 'Pendente de pagamento' ('Para adquirir o playback ou colocar sua voz, conclua o pagamento com os dados abaixo:')",
       received_preview: truncate(textContent, 100),
     });
   }
@@ -69,6 +80,8 @@ export default async function(req: Request) {
     body?.Chat?.Contact?.PhoneNumber ||
     body?.FromPhone ||
     body?.ToPhone ||
+    body?.payload?.contact?.phoneNumber ||
+    body?.data?.contact?.phoneNumber ||
     "";
 
   const customerName =
@@ -76,6 +89,8 @@ export default async function(req: Request) {
     body?.chat?.contact?.name ||
     body?.Contact?.Name ||
     body?.Chat?.Contact?.Name ||
+    body?.payload?.contact?.name ||
+    body?.data?.contact?.name ||
     "";
 
   const phoneInfo = extractPhone(phoneCandidate || textContent);
