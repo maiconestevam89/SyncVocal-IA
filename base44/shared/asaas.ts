@@ -1,4 +1,13 @@
 const ASAAS_API_URL = "https://api.asaas.com/v3";
+const ASAAS_USER_AGENT = "SyncVocal-App/1.0";
+
+function asaasHeaders(apiKey: string) {
+  return {
+    "access_token": apiKey,
+    "Content-Type": "application/json",
+    "User-Agent": ASAAS_USER_AGENT,
+  };
+}
 
 export interface AsaasCustomer {
   id: string;
@@ -31,10 +40,7 @@ export async function findOrCreateAsaasCustomer(
   { name, phoneDigits }: { name?: string; phoneDigits: string }
 ): Promise<AsaasCustomer> {
   const searchRes = await fetch(`${ASAAS_API_URL}/customers?mobilePhone=${encodeURIComponent(phoneDigits)}&limit=1`, {
-    headers: {
-      "access_token": apiKey,
-      "Content-Type": "application/json",
-    },
+    headers: asaasHeaders(apiKey),
     signal: AbortSignal.timeout(20000),
   });
 
@@ -49,10 +55,7 @@ export async function findOrCreateAsaasCustomer(
   const displayName = (name && name.trim().length > 1) ? name.trim() : `Cliente ${phoneDigits}`;
   const createRes = await fetch(`${ASAAS_API_URL}/customers`, {
     method: "POST",
-    headers: {
-      "access_token": apiKey,
-      "Content-Type": "application/json",
-    },
+    headers: asaasHeaders(apiKey),
     body: JSON.stringify({
       name: displayName,
       mobilePhone: phoneDigits,
@@ -88,10 +91,7 @@ export async function createAsaasPixPayment(
 
   const res = await fetch(`${ASAAS_API_URL}/payments`, {
     method: "POST",
-    headers: {
-      "access_token": apiKey,
-      "Content-Type": "application/json",
-    },
+    headers: asaasHeaders(apiKey),
     body: JSON.stringify({
       customer: customerId,
       billingType: "PIX",
@@ -117,10 +117,7 @@ export async function getAsaasPixQrCode(
   paymentId: string
 ): Promise<AsaasPixQrCode> {
   const res = await fetch(`${ASAAS_API_URL}/payments/${paymentId}/pixQrCode`, {
-    headers: {
-      "access_token": apiKey,
-      "Content-Type": "application/json",
-    },
+    headers: asaasHeaders(apiKey),
     signal: AbortSignal.timeout(20000),
   });
 

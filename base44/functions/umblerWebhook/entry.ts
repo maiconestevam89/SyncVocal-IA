@@ -3,6 +3,22 @@ import { secrets } from 'base44:runtime';
 import { extractPhone, sendUmblerTextMessage, truncate } from '../../shared/umblerTalk.ts';
 import { findOrCreateAsaasCustomer, createAsaasPixPayment, getAsaasPixQrCode } from '../../shared/asaas.ts';
 
+function extractAllStrings(obj: any): string[] {
+  const strings: string[] = [];
+  function recurse(val: any) {
+    if (!val) return;
+    if (typeof val === "string") {
+      strings.push(val);
+    } else if (Array.isArray(val)) {
+      for (const item of val) recurse(item);
+    } else if (typeof val === "object") {
+      for (const v of Object.values(val)) recurse(v);
+    }
+  }
+  recurse(obj);
+  return strings;
+}
+
 export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
@@ -24,76 +40,69 @@ export default async function(req: Request) {
     return Response.json({ error: "Payload JSON inválido" }, { status: 400 });
   }
 
-  // 1. Extração do texto e trigger
-  const textContent = (
-    body?.message?.content ||
-    body?.message?.text ||
-    body?.message?.body ||
-    body?.content ||
-    body?.text ||
-    body?.Message?.Content ||
-    body?.Message?.Text ||
-    body?.payload?.message?.text ||
-    body?.data?.message?.text ||
-    body?.triggerName ||
-    body?.botName ||
-    body?.TriggerName ||
-    body?.BotName ||
-    ""
-  ).toString();
+  // 1. Extração universal de todos os textos para garantir detecção do gatilho
+  const allStrings = extractAllStrings(body);
+  const normalizedStrings = allStrings.map(s =>
+    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  );
 
-  const normalized = textContent
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-  // Mensagem inicial da execução do bot "Pendente de pagamento":
-  // "Para adquirir o playback ou colocar sua voz, conclua o pagamento com os dados abaixo:"
   const isTriggerMatch =
-    normalized.includes("para adquirir o playback ou colocar sua voz") ||
-    normalized.includes("conclua o pagamento com os dados abaixo") ||
-    normalized.includes("adquirir o playback") ||
-    normalized.includes("pendente de pagamento") ||
+    normalizedStrings.some(s =>
+      s.includes("para adquirir o playback ou colocar sua voz") ||
+      s.includes("conclua o pagamento com os dados abaixo") ||
+      s.includes("adquirir o playback") ||
+      s.includes("pendente de pagamento")
+    ) ||
     body?.force === true;
 
   if (!isTriggerMatch) {
     return Response.json({
       ignored: true,
       reason: "Mensagem ou evento não corresponde ao gatilho do bot 'Pendente de pagamento' ('Para adquirir o playback ou colocar sua voz, conclua o pagamento com os dados abaixo:')",
-      received_preview: truncate(textContent, 100),
+      received_preview: truncate(allStrings.join(" | "), 150),
     });
   }
 
-  // 2. Extração do telefone do cliente
-  const phoneCandidate =
-    body?.contact?.phoneNumber ||
-    body?.contact?.phone ||
-    body?.chat?.contact?.phoneNumber ||
-    body?.chat?.contact?.phone ||
-    body?.chat?.toPhone ||
-    body?.chat?.fromPhone ||
-    body?.customerPhone ||
-    body?.phone ||
-    body?.toPhone ||
-    body?.fromPhone ||
-    body?.Contact?.PhoneNumber ||
-    body?.Chat?.Contact?.PhoneNumber ||
-    body?.FromPhone ||
-    body?.ToPhone ||
-    body?.payload?.contact?.phoneNumber ||
-    body?.data?.contact?.phoneNumber ||
-    "";
+  // 2. Extração do telefone do cliente (prioriza campos oficiais do Umbler Talk)
+  const explicitCandidates = [
+    body?.Payload?.Content?.Contact?.PhoneNumber,
+    body?.payload?.content?.contact?.phoneNumber,
+    body?.Payload?.Content?.Contact?.Phone,
+    body?.payload?.content?.contact?.phone,
+    body?.Payload?.Content?.LastMessage?.ToPhone,
+    body?.Payload?.Content?.LastMessage?.FromPhone,
+    body?.contact?.phoneNumber,
+    body?.contact?.phone,
+    body?.chat?.contact?.phoneNumber,
+    body?.chat?.contact?.phone,
+    body?.chat?.toPhone,
+    body?.chat?.fromPhone,
+    body?.["contact[number]"],
+    body?.customerPhone,
+    body?.phone,
+    body?.toPhone,
+    body?.fromPhone,
+  ];
 
-  const customerName =
-    body?.contact?.name ||
-    body?.chat?.contact?.name ||
-    body?.Contact?.Name ||
-    body?.Chat?.Contact?.Name ||
-    body?.payload?.contact?.name ||
-    body?.data?.contact?.name ||
-    "";
+  let phoneInfo = null;
+  for (const cand of explicitCandidates) {
+    if (cand) {
+      phoneInfo = extractPhone(cand);
+      if (phoneInfo) break;
+    }
+  }
 
-  const phoneInfo = extractPhone(phoneCandidate || textContent);
+  // Se não encontrou nos campos explícitos, busca em qualquer string do payload
+  if (!phoneInfo) {
+    for (const str of allStrings) {
+      const candidate = extractPhone(str);
+      if (candidate) {
+        phoneInfo = candidate;
+        break;
+      }
+    }
+  }
+
   if (!phoneInfo) {
     return Response.json({
       success: false,
@@ -101,6 +110,14 @@ export default async function(req: Request) {
       payload_sample: truncate(body, 500),
     }, { status: 400 });
   }
+
+  const customerName =
+    body?.Payload?.Content?.Contact?.Name ||
+    body?.payload?.content?.contact?.name ||
+    body?.contact?.name ||
+    body?.chat?.contact?.name ||
+    body?.["contact[name]"] ||
+    "";
 
   // 3. Verificação das credenciais
   const asaasApiKey = secrets.get("ASAAS_API_KEY");
@@ -154,8 +171,8 @@ export default async function(req: Request) {
     if (umblerToken && umblerOrgId && umblerChannelPhone) {
       const pixMessage =
         "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
-        "💰 *Valor:* R$ 49,90\n\n" +
-        "📌 *Código Pix Copia e Cola:*\n" +
+        "💵 *Valor:* R$ 49,90\n\n" +
+        "📋 *Código Pix Copia e Cola:*\n" +
         `${pixData.payload}\n\n` +
         "🔗 *Ou pague pelo link:*\n" +
         `${payment.invoiceUrl}\n\n` +

@@ -35,6 +35,14 @@ export function extractPhone(text: string): { e164: string; digits: string; ddd:
   };
 }
 
+export function ensureE164(phone: string): string {
+  if (!phone) return "";
+  const cleaned = phone.replace(/[^\d+]/g, "");
+  if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.startsWith("55")) return `+${cleaned}`;
+  return `+55${cleaned}`;
+}
+
 export function truncate(obj: any, max = 2000): string {
   const str = typeof obj === "string" ? obj : JSON.stringify(obj);
   return str.length > max ? str.slice(0, max) : str;
@@ -55,25 +63,28 @@ export async function invokeStartBot({
   channelPhone: string;
   customerPhone: string;
 }) {
+  const fromPhone = ensureE164(channelPhone);
+  const toPhone = ensureE164(customerPhone);
+
   const attempts = [
     {
       url: `${UTALK_BASE}/v1/chats/start-bot/`,
-      body: { botId, organizationId: orgId, triggerName, toPhone: channelPhone, fromPhone: customerPhone },
+      body: { botId, organizationId: orgId, triggerName, toPhone: fromPhone, fromPhone: toPhone },
       label: "oficial_com_barra",
     },
     {
       url: `${UTALK_BASE}/v1/chats/start-bot`,
-      body: { botId, organizationId: orgId, triggerName, toPhone: channelPhone, fromPhone: customerPhone },
+      body: { botId, organizationId: orgId, triggerName, toPhone: fromPhone, fromPhone: toPhone },
       label: "oficial_sem_barra",
     },
     {
       url: `${UTALK_BASE}/v1/chats/start-bot/`,
-      body: { botId, organizationId: orgId, triggerName, toPhone: customerPhone, fromPhone: channelPhone },
+      body: { botId, organizationId: orgId, triggerName, toPhone: toPhone, fromPhone: fromPhone },
       label: "invertido_com_barra",
     },
     {
       url: `${UTALK_BASE}/v1/chats/start-bot`,
-      body: { botId, organizationId: orgId, triggerName, toPhone: customerPhone, fromPhone: channelPhone },
+      body: { botId, organizationId: orgId, triggerName, toPhone: toPhone, fromPhone: fromPhone },
       label: "invertido_sem_barra",
     },
   ];
@@ -121,11 +132,14 @@ export async function sendUmblerTextMessage({
   customerPhone: string;
   text: string;
 }) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
   // Tenta envio simplificado via FormData
   try {
     const formData = new FormData();
-    formData.append("ToPhone", customerPhone);
-    formData.append("FromPhone", channelPhone);
+    formData.append("ToPhone", to);
+    formData.append("FromPhone", from);
     formData.append("OrganizationId", orgId);
     formData.append("Message", text);
 
@@ -146,15 +160,15 @@ export async function sendUmblerTextMessage({
   }
 
   // Fallback JSON
-  const jsonRes = await fetch(`${UTALK_BASE}/v1/messages/`, {
+  const jsonRes = await fetch(`${UTALK_BASE}/v1/messages/simplified/`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      toPhone: customerPhone,
-      fromPhone: channelPhone,
+      toPhone: to,
+      fromPhone: from,
       organizationId: orgId,
       message: text,
     }),
@@ -181,9 +195,12 @@ export async function sendUmblerMediaFile({
   fileBlob: Blob;
   fileName: string;
 }) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
   const formData = new FormData();
-  formData.append("ToPhone", customerPhone);
-  formData.append("FromPhone", channelPhone);
+  formData.append("ToPhone", to);
+  formData.append("FromPhone", from);
   formData.append("OrganizationId", orgId);
   formData.append("File", fileBlob, fileName);
 

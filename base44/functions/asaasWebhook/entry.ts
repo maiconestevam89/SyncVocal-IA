@@ -58,7 +58,7 @@ export default async function(req: Request) {
   if (!rawPhone && payment?.customer && asaasApiKey) {
     try {
       const cusRes = await fetch(`${ASAAS_API_URL}/customers/${payment.customer}`, {
-        headers: { "access_token": asaasApiKey },
+        headers: { "access_token": asaasApiKey, "User-Agent": "SyncVocal-App/1.0" },
         signal: AbortSignal.timeout(15000),
       });
       if (cusRes.ok) {
