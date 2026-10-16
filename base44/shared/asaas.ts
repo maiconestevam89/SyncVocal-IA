@@ -114,6 +114,46 @@ export async function findPendingAsaasPayment(
   return null;
 }
 
+/**
+ * Busca se existe uma cobrança PAGA recentemente (RECEIVED ou CONFIRMED) no Asaas.
+ * Garante que quem já pagou não receba novas cobranças em loop.
+ */
+export async function findRecentPaidAsaasPayment(
+  apiKey: string,
+  { customerId, externalReference }: { customerId?: string; externalReference?: string }
+): Promise<AsaasPayment | null> {
+  try {
+    const checkQuery = async (query: string): Promise<AsaasPayment | null> => {
+      const res = await fetch(`${ASAAS_API_URL}/payments?${query}&limit=5`, {
+        headers: asaasHeaders(apiKey),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        const list = await res.json();
+        if (list?.data && list.data.length > 0) {
+          const paid = list.data.find((p: any) => p.status === "RECEIVED" || p.status === "CONFIRMED");
+          if (paid) return paid;
+        }
+      }
+      return null;
+    };
+
+    if (externalReference) {
+      const paid = await checkQuery(`externalReference=${encodeURIComponent(externalReference)}`);
+      if (paid) return paid;
+    }
+
+    if (customerId) {
+      const paid = await checkQuery(`customer=${encodeURIComponent(customerId)}`);
+      if (paid) return paid;
+    }
+  } catch (err) {
+    console.warn("Aviso ao buscar cobrança paga recente no Asaas:", err);
+  }
+
+  return null;
+}
+
 export async function createAsaasPixPayment(
   apiKey: string,
   {
