@@ -3,44 +3,28 @@ import { secrets } from 'base44:runtime';
 import { extractPhone, sendUmblerTextMessage, truncate } from '../../shared/umblerTalk.ts';
 import {
   findOrCreateAsaasCustomer,
-  createAsaasPixPayment,
+  createAsaasPixPaymentOrLink,
   getAsaasPixQrCode,
   findPendingAsaasPayment,
   findRecentPaidAsaasPayment,
 } from '../../shared/asaas.ts';
 
-// Mapa em memória para evitar rajadas simultâneas (debounce de 2 minutos por telefone)
+// Mapa em memória para evitar rajadas simultâneas do webhook (debounce de 30 segundos por telefone)
 const phoneDebounceMap = new Map<string, number>();
-const DEBOUNCE_MS = 2 * 60 * 1000;
-
-function extractAllStrings(obj: any): string[] {
-  const strings: string[] = [];
-  function recurse(val: any) {
-    if (!val) return;
-    if (typeof val === "string") {
-      strings.push(val);
-    } else if (Array.isArray(val)) {
-      for (const item of val) recurse(item);
-    } else if (typeof val === "object") {
-      for (const v of Object.values(val)) recurse(v);
-    }
-  }
-  recurse(obj);
-  return strings;
-}
+const DEBOUNCE_MS = 30 * 1000;
 
 function normalizeString(str: string): string {
   return str
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[̀-ͯ]/g, "");
 }
 
 export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
-      description: "Webhook do Umbler Talk v2 (proteção anti-loop, anti-replay e idempotência de pagamento)",
+      description: "Webhook do Umbler Talk v3 (anti-pausa, debounce de rajadas e fallback para Link de Pagamento Asaas)",
     });
   }
 
@@ -54,54 +38,70 @@ export default async function(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "Payload JSON inválido" }, { status: 400 });
+    // Retorna 200 para evitar que o Umbler pause o webhook por falha de parser
+    return Response.json({ ignored: true, reason: "Payload JSON inválido" }, { status: 200 });
   }
 
-  // 1. Extração universal de todos os textos do payload
-  const allStrings = extractAllStrings(body);
-  const normalizedStrings = allStrings.map(normalizeString);
+  // 1. Ignorar confirmações de entrega (ACK) imediatamente para evitar loops
+  if (body?.ack || body?.event === "ack" || body?.Event === "ack" || body?.type === "ack") {
+    return Response.json({ ignored: true, reason: "Evento de confirmação (ACK) ignorado." });
+  }
 
-  // TRAVA 1: Rejeitar mensagens do sistema, confirmações e mídias para evitar auto-gatilho e loop infinito
-  const isSelfSystemMessage = normalizedStrings.some(s =>
-    s.includes("aqui esta o seu pix para liberacao") ||
-    s.includes("codigo pix copia e cola") ||
-    s.includes("ou pague pelo link") ||
-    s.includes("assim que o pagamento for identificado") ||
-    s.includes("pagamento confirmado") ||
-    s.includes("aqui estao suas musicas") ||
-    s.includes(".mp3") ||
-    s.includes(".wav") ||
-    s.includes("final 01") ||
-    s.includes("final 02") ||
-    s.includes("playback 01") ||
-    s.includes("playback 02")
-  );
+  // 2. Extrai o texto da MENSAGEM ATUAL (não vasculhar o array histórico para evitar loops e falsos positivos)
+  const currentMessageText = (
+    body?.Payload?.Content?.LastMessage?.Content ||
+    body?.Payload?.Content?.Message?.Content ||
+    body?.message?.content ||
+    body?.message?.text ||
+    body?.message?.body ||
+    body?.chat?.body ||
+    body?.chat?.lastMessage ||
+    body?.chat?.LastMessage ||
+    body?.content ||
+    body?.text ||
+    body?.Message ||
+    ""
+  ).toString();
+
+  const normalizedMessage = normalizeString(currentMessageText);
+
+  // 3. TRAVA ANTI-LOOP: Rejeitar mensagens do próprio sistema
+  const isSelfSystemMessage =
+    normalizedMessage.includes("aqui esta o seu pix") ||
+    normalizedMessage.includes("aqui esta o seu link") ||
+    normalizedMessage.includes("codigo pix copia e cola") ||
+    normalizedMessage.includes("ou pague pelo link") ||
+    normalizedMessage.includes("acesse para pagar via pix") ||
+    normalizedMessage.includes("assim que o pagamento for identificado") ||
+    normalizedMessage.includes("pagamento confirmado") ||
+    normalizedMessage.includes("aqui estao suas musicas") ||
+    normalizedMessage.includes("final 01") ||
+    normalizedMessage.includes("final 02") ||
+    normalizedMessage.includes("playback 01") ||
+    normalizedMessage.includes("playback 02");
 
   if (isSelfSystemMessage && !body?.force) {
     return Response.json({
       ignored: true,
-      reason: "Mensagem ou mídia do próprio sistema / confirmação de entrega (descartada para prevenir loop infinito).",
+      reason: "Mensagem do próprio sistema (descartada para prevenir auto-disparo e loop infinito).",
     });
   }
 
-  // TRAVA 2: O gatilho DEVE ser a frase específica da primeira mensagem do bot "Pendente de pagamento"
-  // NUNCA usar apenas o nome do bot ("pendente de pagamento") porque ele fica anexado nos metadados do chat para todos os eventos!
+  // 4. TRAVA DE GATILHO: O gatilho é a frase específica da primeira mensagem do bot "Pendente de pagamento"
   const isTriggerMatch =
-    normalizedStrings.some(s =>
-      s.includes("para adquirir o playback ou colocar sua voz") ||
-      s.includes("conclua o pagamento com os dados abaixo")
-    ) ||
+    normalizedMessage.includes("para adquirir o playback ou colocar sua voz") ||
+    normalizedMessage.includes("conclua o pagamento com os dados abaixo") ||
     body?.force === true;
 
   if (!isTriggerMatch) {
     return Response.json({
       ignored: true,
       reason: "Mensagem ou evento não corresponde ao texto inicial do bot 'Pendente de pagamento'.",
-      received_preview: truncate(allStrings.join(" | "), 150),
+      received_preview: truncate(currentMessageText, 100),
     });
   }
 
-  // 2. Extração do telefone do cliente (prioriza campos oficiais do Umbler Talk)
+  // 5. Extração do telefone do cliente (prioriza campos oficiais do Umbler Talk)
   const explicitCandidates = [
     body?.Payload?.Content?.Contact?.PhoneNumber,
     body?.payload?.content?.contact?.phoneNumber,
@@ -130,32 +130,20 @@ export default async function(req: Request) {
     }
   }
 
-  // Se não encontrou nos campos explícitos, busca em qualquer string do payload
-  if (!phoneInfo) {
-    for (const str of allStrings) {
-      const candidate = extractPhone(str);
-      if (candidate) {
-        phoneInfo = candidate;
-        break;
-      }
-    }
-  }
-
   if (!phoneInfo) {
     return Response.json({
       success: false,
       error: "Telefone do contato não identificado no payload do Umbler.",
-      payload_sample: truncate(body, 500),
-    }, { status: 400 });
+    }, { status: 200 }); // Retorna 200 para não pausar o webhook no Umbler
   }
 
-  // TRAVA 3: Debounce em memória por telefone (bloqueia requisições duplicadas em menos de 2 minutos)
+  // 6. TRAVA: Debounce de 30 segundos por telefone para absorver rajadas do Umbler
   const now = Date.now();
   const lastProcessed = phoneDebounceMap.get(phoneInfo.digits);
   if (lastProcessed && (now - lastProcessed) < DEBOUNCE_MS && !body?.force) {
     return Response.json({
       ignored: true,
-      reason: `Requisição ignorada pelo debounce: cobrança já disparada para ${phoneInfo.formatted} há menos de 2 minutos.`,
+      reason: `Rajada duplicada ignorada pelo debounce (já enviado para ${phoneInfo.formatted} há menos de 30 segundos).`,
     });
   }
 
@@ -167,73 +155,27 @@ export default async function(req: Request) {
     body?.["contact[name]"] ||
     "";
 
-  // 3. Verificação das credenciais
-  const asaasApiKey = secrets.get("ASAS_API_KEY") || secrets.get("ASAAS_API_KEY");
+  // 7. Verificação das credenciais
+  const asaasApiKey = secrets.get("ASAAS_API_KEY") || secrets.get("ASAS_API_KEY");
   const umblerToken = secrets.get("UMBLER_TALK_API_TOKEN");
   const umblerOrgId = secrets.get("UMBLER_TALK_ORGANIZATION_ID");
   const umblerChannelPhone = secrets.get("UMBLER_TALK_FROM_PHONE");
 
   if (!asaasApiKey) {
     return Response.json({
+      success: false,
       error: "Secret ASAAS_API_KEY não configurado.",
-    }, { status: 500 });
+    }, { status: 200 });
   }
 
   try {
-    // TRAVA 4: Verificação no banco de dados Base44 (MusicPayment)
-    // Se o cliente já PAGOU recentemente (status: 'paid' ou 'delivered' nas últimas 24h), BLOQUEAR!
-    // Se o cliente tem cobrança PENDENTE ativa, REUTILIZAR e NÃO criar nova!
-    if (base44?.asServiceRole?.entities?.MusicPayment && !body?.force) {
-      try {
-        const existingRecords = await base44.asServiceRole.entities.MusicPayment.filter({
-          phone_digits: phoneInfo.digits,
-        });
-
-        // 4.1 Trava de pagamento já concluído
-        const alreadyPaid = existingRecords?.find((rec: any) => {
-          if (rec.status === "paid" || rec.status === "delivered") {
-            const time = rec.updated_at || rec.created_at ? new Date(rec.updated_at || rec.created_at).getTime() : 0;
-            return (now - time) < 24 * 60 * 60 * 1000; // 24 horas
-          }
-          return false;
-        });
-
-        if (alreadyPaid) {
-          phoneDebounceMap.set(phoneInfo.digits, now);
-          return Response.json({
-            ignored: true,
-            reason: `Cliente já realizou o pagamento desta música (Status: ${alreadyPaid.status}, ID: ${alreadyPaid.asaas_payment_id}). Nenhuma nova cobrança pode ser gerada.`,
-          });
-        }
-
-        // 4.2 Trava de cobrança pendente existente
-        const pendingOrRecent = existingRecords?.find((rec: any) => {
-          if (rec.status === "pending") return true;
-          const createdTime = rec.created_at ? new Date(rec.created_at).getTime() : 0;
-          return (now - createdTime) < 15 * 60 * 1000; // 15 minutos
-        });
-
-        if (pendingOrRecent) {
-          phoneDebounceMap.set(phoneInfo.digits, now);
-          return Response.json({
-            ignored: true,
-            reason: `Cobrança já ativa para este telefone no sistema (Status: ${pendingOrRecent.status}, ID: ${pendingOrRecent.asaas_payment_id}). Cooldown ativo para evitar cobranças repetidas.`,
-            payment_id: pendingOrRecent.asaas_payment_id,
-            invoice_url: pendingOrRecent.invoice_url,
-          });
-        }
-      } catch (dbCheckErr) {
-        console.warn("Aviso ao verificar cobranças existentes em MusicPayment:", dbCheckErr);
-      }
-    }
-
-    // 4. Localização ou Criação do cliente no Asaas
+    // 8. Localização ou Criação do cliente no Asaas
     const customer = await findOrCreateAsaasCustomer(asaasApiKey, {
       name: customerName,
       phoneDigits: phoneInfo.digits,
     });
 
-    // TRAVA 5: Checagem no Asaas se já foi PAGO recentemente
+    // 9. Checagem no Asaas se já foi PAGO recentemente
     const recentPaid = await findRecentPaidAsaasPayment(asaasApiKey, {
       customerId: customer.id,
       externalReference: phoneInfo.digits,
@@ -247,31 +189,41 @@ export default async function(req: Request) {
       });
     }
 
-    // TRAVA 6: Idempotência na API do Asaas para cobrança PENDENTE
+    // 10. Idempotência no Asaas para cobrança PENDENTE existente
     let payment = await findPendingAsaasPayment(asaasApiKey, {
       customerId: customer.id,
       externalReference: phoneInfo.digits,
     });
 
-    let isNewPayment = false;
-    if (!payment) {
-      payment = await createAsaasPixPayment(asaasApiKey, {
+    let paymentResult: { id: string; invoiceUrl: string; pixCode?: string; isLink: boolean };
+
+    if (payment) {
+      console.log(`Reutilizando cobrança pendente existente no Asaas: ${payment.id}`);
+      let pixCode: string | undefined;
+      try {
+        const pixData = await getAsaasPixQrCode(asaasApiKey, payment.id);
+        pixCode = pixData.payload;
+      } catch {}
+      paymentResult = {
+        id: payment.id,
+        invoiceUrl: payment.invoiceUrl,
+        pixCode,
+        isLink: false,
+      };
+    } else {
+      // Cria nova cobrança ou link de pagamento (com fallback automático se faltar CPF)
+      paymentResult = await createAsaasPixPaymentOrLink(asaasApiKey, {
         customerId: customer.id,
         value: 49.90,
         externalReference: phoneInfo.digits,
         description: "Música Personalizada - Produção Final e Playbacks",
       });
-      isNewPayment = true;
-    } else {
-      console.log(`Reutilizando cobrança pendente existente no Asaas: ${payment.id}`);
     }
-
-    const pixData = await getAsaasPixQrCode(asaasApiKey, payment.id);
 
     // Registra timestamp do debounce
     phoneDebounceMap.set(phoneInfo.digits, now);
 
-    // 5. Salva na entidade MusicPayment
+    // 11. Salva na entidade MusicPayment
     if (base44?.asServiceRole?.entities?.MusicPayment) {
       try {
         await base44.asServiceRole.entities.MusicPayment.create({
@@ -279,10 +231,10 @@ export default async function(req: Request) {
           phone_digits: phoneInfo.digits,
           customer_name: customerName || customer.name,
           asaas_customer_id: customer.id,
-          asaas_payment_id: payment.id,
-          pix_code: pixData.payload,
-          invoice_url: payment.invoiceUrl,
-          amount: payment.value || 49.90,
+          asaas_payment_id: paymentResult.id,
+          pix_code: paymentResult.pixCode || "",
+          invoice_url: paymentResult.invoiceUrl,
+          amount: 49.90,
           status: "pending",
         });
       } catch (dbErr: any) {
@@ -290,17 +242,27 @@ export default async function(req: Request) {
       }
     }
 
-    // 6. Envia mensagem com código Pix via Umbler Talk APENAS se for uma cobrança nova
+    // 12. Envia mensagem para o cliente via Umbler Talk
     let umblerSendResult: any = null;
-    if (isNewPayment && umblerToken && umblerOrgId && umblerChannelPhone) {
-      const pixMessage =
-        "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
-        "💰 *Valor:* R$ 49,90\n\n" +
-        "📱 *Código Pix Copia e Cola:*\n" +
-        `${pixData.payload}\n\n` +
-        "🔗 *Ou pague pelo link:*\n" +
-        `${payment.invoiceUrl}\n\n` +
-        "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
+    if (umblerToken && umblerOrgId && umblerChannelPhone) {
+      let pixMessage = "";
+      if (paymentResult.pixCode) {
+        pixMessage =
+          "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
+          "💵 *Valor:* R$ 49,90\n\n" +
+          "📋 *Código Pix Copia e Cola:*\n" +
+          `${paymentResult.pixCode}\n\n` +
+          "🔗 *Ou pague pelo link:*\n" +
+          `${paymentResult.invoiceUrl}\n\n` +
+          "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
+      } else {
+        pixMessage =
+          "Aqui está o seu link para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
+          "💵 *Valor:* R$ 49,90\n\n" +
+          "🔗 *Acesse para pagar via Pix:*\n" +
+          `${paymentResult.invoiceUrl}\n\n` +
+          "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
+      }
 
       umblerSendResult = await sendUmblerTextMessage({
         apiToken: umblerToken,
@@ -314,17 +276,19 @@ export default async function(req: Request) {
     return Response.json({
       success: true,
       phone: phoneInfo.e164,
-      asaas_payment_id: payment.id,
-      invoice_url: payment.invoiceUrl,
-      pix_code: pixData.payload,
-      new_payment_created: isNewPayment,
-      umbler_notified: isNewPayment ? (umblerSendResult?.ok ?? false) : false,
-      notice: isNewPayment ? "Cobrança gerada e enviada com sucesso." : "Cobrança pendente existente reutilizada.",
+      asaas_payment_id: paymentResult.id,
+      invoice_url: paymentResult.invoiceUrl,
+      pix_code: paymentResult.pixCode || null,
+      is_link: paymentResult.isLink,
+      umbler_notified: umblerSendResult?.ok ?? false,
+      notice: "Cobrança preparada e enviada com sucesso.",
     });
   } catch (error: any) {
+    console.error("Erro no processamento do webhook:", error);
+    // Retorna 200 com success: false para evitar que o Umbler pause o webhook
     return Response.json({
       success: false,
       error: error.message || String(error),
-    }, { status: 500 });
+    }, { status: 200 });
   }
 }
