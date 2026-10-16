@@ -1,7 +1,16 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
 import { extractPhone, sendUmblerTextMessage, truncate } from '../../shared/umblerTalk.ts';
-import { findOrCreateAsaasCustomer, createAsaasPixPayment, getAsaasPixQrCode } from '../../shared/asaas.ts';
+import {
+  findOrCreateAsaasCustomer,
+  createAsaasPixPayment,
+  getAsaasPixQrCode,
+  findPendingAsaasPayment,
+} from '../../shared/asaas.ts';
+
+// Mapa em memória para evitar rajadas simultâneas (debounce de 2 minutos por telefone)
+const phoneDebounceMap = new Map<string, number>();
+const DEBOUNCE_MS = 2 * 60 * 1000;
 
 function extractAllStrings(obj: any): string[] {
   const strings: string[] = [];
@@ -19,11 +28,18 @@ function extractAllStrings(obj: any): string[] {
   return strings;
 }
 
+function normalizeString(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
-      description: "Webhook do Umbler Talk para disparo da cobrança Asaas ao iniciar o bot 'Pendente de pagamento'",
+      description: "Webhook do Umbler Talk com proteção anti-loop e idempotência para o bot 'Pendente de pagamento'",
     });
   }
 
@@ -40,25 +56,38 @@ export default async function(req: Request) {
     return Response.json({ error: "Payload JSON inválido" }, { status: 400 });
   }
 
-  // 1. Extração universal de todos os textos para garantir detecção do gatilho
+  // 1. Extração universal de todos os textos do payload
   const allStrings = extractAllStrings(body);
-  const normalizedStrings = allStrings.map(s =>
-    s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  const normalizedStrings = allStrings.map(normalizeString);
+
+  // TRAVA 1: Rejeitar mensagens do próprio sistema / Pix para evitar auto-gatilho e loop infinito
+  const isSelfSystemMessage = normalizedStrings.some(s =>
+    s.includes("aqui esta o seu pix para liberacao") ||
+    s.includes("codigo pix copia e cola") ||
+    s.includes("ou pague pelo link") ||
+    s.includes("assim que o pagamento for identificado")
   );
 
+  if (isSelfSystemMessage && !body?.force) {
+    return Response.json({
+      ignored: true,
+      reason: "Mensagem emitida pelo próprio sistema de pagamento (descartada para prevenir loop infinito).",
+    });
+  }
+
+  // TRAVA 2: O gatilho DEVE ser a frase específica da primeira mensagem do bot "Pendente de pagamento"
+  // NUNCA usar apenas o nome do bot ("pendente de pagamento") porque ele fica anexado nos metadados do chat para todos os eventos!
   const isTriggerMatch =
     normalizedStrings.some(s =>
       s.includes("para adquirir o playback ou colocar sua voz") ||
-      s.includes("conclua o pagamento com os dados abaixo") ||
-      s.includes("adquirir o playback") ||
-      s.includes("pendente de pagamento")
+      s.includes("conclua o pagamento com os dados abaixo")
     ) ||
     body?.force === true;
 
   if (!isTriggerMatch) {
     return Response.json({
       ignored: true,
-      reason: "Mensagem ou evento não corresponde ao gatilho do bot 'Pendente de pagamento' ('Para adquirir o playback ou colocar sua voz, conclua o pagamento com os dados abaixo:')",
+      reason: "Mensagem ou evento não corresponde ao texto inicial do bot 'Pendente de pagamento'.",
       received_preview: truncate(allStrings.join(" | "), 150),
     });
   }
@@ -111,6 +140,16 @@ export default async function(req: Request) {
     }, { status: 400 });
   }
 
+  // TRAVA 3: Debounce em memória por telefone (bloqueia requisições duplicadas em menos de 2 minutos)
+  const now = Date.now();
+  const lastProcessed = phoneDebounceMap.get(phoneInfo.digits);
+  if (lastProcessed && (now - lastProcessed) < DEBOUNCE_MS && !body?.force) {
+    return Response.json({
+      ignored: true,
+      reason: `Requisição ignorada pelo debounce: cobrança já disparada para ${phoneInfo.formatted} há menos de 2 minutos.`,
+    });
+  }
+
   const customerName =
     body?.Payload?.Content?.Contact?.Name ||
     body?.payload?.content?.contact?.name ||
@@ -120,7 +159,7 @@ export default async function(req: Request) {
     "";
 
   // 3. Verificação das credenciais
-  const asaasApiKey = secrets.get("ASAAS_API_KEY");
+  const asaasApiKey = secrets.get("ASAS_API_KEY") || secrets.get("ASAAS_API_KEY");
   const umblerToken = secrets.get("UMBLER_TALK_API_TOKEN");
   const umblerOrgId = secrets.get("UMBLER_TALK_ORGANIZATION_ID");
   const umblerChannelPhone = secrets.get("UMBLER_TALK_FROM_PHONE");
@@ -132,20 +171,66 @@ export default async function(req: Request) {
   }
 
   try {
-    // 4. Criação do cliente e cobrança no Asaas
+    // TRAVA 4: Idempotência no banco de dados Base44 (MusicPayment)
+    // Se já existir cobrança pendente ou criada nos últimos 15 minutos, NÃO criar nem reenviar!
+    if (base44?.asServiceRole?.entities?.MusicPayment && !body?.force) {
+      try {
+        const existingRecords = await base44.asServiceRole.entities.MusicPayment.filter({
+          phone_digits: phoneInfo.digits,
+        });
+
+        const pendingOrRecent = existingRecords?.find((rec: any) => {
+          if (rec.status === "pending") return true;
+          const createdTime = rec.created_at ? new Date(rec.created_at).getTime() : 0;
+          return (now - createdTime) < 15 * 60 * 1000; // 15 minutos
+        });
+
+        if (pendingOrRecent) {
+          // Atualiza debounce para segurar próximas chamadas
+          phoneDebounceMap.set(phoneInfo.digits, now);
+
+          return Response.json({
+            ignored: true,
+            reason: `Cobrança já ativa para este telefone no sistema (Status: ${pendingOrRecent.status}, ID: ${pendingOrRecent.asaas_payment_id}). Cooldown ativo para evitar cobranças repetidas.`,
+            payment_id: pendingOrRecent.asaas_payment_id,
+            invoice_url: pendingOrRecent.invoice_url,
+          });
+        }
+      } catch (dbCheckErr) {
+        console.warn("Aviso ao verificar cobranças existentes em MusicPayment:", dbCheckErr);
+      }
+    }
+
+    // 4. Localização ou Criação do cliente no Asaas
     const customer = await findOrCreateAsaasCustomer(asaasApiKey, {
       name: customerName,
       phoneDigits: phoneInfo.digits,
     });
 
-    const payment = await createAsaasPixPayment(asaasApiKey, {
+    // TRAVA 5: Idempotência na API do Asaas
+    // Verifica se já existe uma cobrança PENDENTE para este telefone ou cliente
+    let payment = await findPendingAsaasPayment(asaasApiKey, {
       customerId: customer.id,
-      value: 49.90,
       externalReference: phoneInfo.digits,
-      description: "Música Personalizada - Produção Final e Playbacks",
     });
 
+    let isNewPayment = false;
+    if (!payment) {
+      payment = await createAsaasPixPayment(asaasApiKey, {
+        customerId: customer.id,
+        value: 49.90,
+        externalReference: phoneInfo.digits,
+        description: "Música Personalizada - Produção Final e Playbacks",
+      });
+      isNewPayment = true;
+    } else {
+      console.log(`Reutilizando cobrança pendente existente no Asaas: ${payment.id}`);
+    }
+
     const pixData = await getAsaasPixQrCode(asaasApiKey, payment.id);
+
+    // Registra timestamp do debounce
+    phoneDebounceMap.set(phoneInfo.digits, now);
 
     // 5. Salva na entidade MusicPayment
     if (base44?.asServiceRole?.entities?.MusicPayment) {
@@ -166,13 +251,14 @@ export default async function(req: Request) {
       }
     }
 
-    // 6. Envia mensagem com código Pix de volta para o cliente via Umbler Talk
+    // 6. Envia mensagem com código Pix via Umbler Talk APENAS se for uma cobrança nova
+    // Se a cobrança já existia, NÃO reenvia mensagem para não lotar o chat do cliente
     let umblerSendResult: any = null;
-    if (umblerToken && umblerOrgId && umblerChannelPhone) {
+    if (isNewPayment && umblerToken && umblerOrgId && umblerChannelPhone) {
       const pixMessage =
         "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
-        "💵 *Valor:* R$ 49,90\n\n" +
-        "📋 *Código Pix Copia e Cola:*\n" +
+        "💰 *Valor:* R$ 49,90\n\n" +
+        "📱 *Código Pix Copia e Cola:*\n" +
         `${pixData.payload}\n\n` +
         "🔗 *Ou pague pelo link:*\n" +
         `${payment.invoiceUrl}\n\n` +
@@ -193,7 +279,9 @@ export default async function(req: Request) {
       asaas_payment_id: payment.id,
       invoice_url: payment.invoiceUrl,
       pix_code: pixData.payload,
-      umbler_notified: umblerSendResult?.ok ?? false,
+      new_payment_created: isNewPayment,
+      umbler_notified: isNewPayment ? (umblerSendResult?.ok ?? false) : false,
+      notice: isNewPayment ? "Cobrança gerada e enviada com sucesso." : "Cobrança pendente existente reutilizada.",
     });
   } catch (error: any) {
     return Response.json({
