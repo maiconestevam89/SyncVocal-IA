@@ -75,7 +75,6 @@ export async function findOrCreateAsaasCustomer(
 
 /**
  * Busca se já existe uma cobrança PENDENTE ativa no Asaas para este cliente ou telefone.
- * Evita geração repetida de cobranças para o mesmo pedido.
  */
 export async function findPendingAsaasPayment(
   apiKey: string,
@@ -116,7 +115,6 @@ export async function findPendingAsaasPayment(
 
 /**
  * Busca se existe uma cobrança PAGA recentemente (RECEIVED ou CONFIRMED) no Asaas.
- * Garante que quem já pagou não receba novas cobranças em loop.
  */
 export async function findRecentPaidAsaasPayment(
   apiKey: string,
@@ -168,7 +166,6 @@ export async function createAsaasPixPayment(
     description?: string;
   }
 ): Promise<AsaasPayment> {
-  // Data de vencimento = hoje + 2 dias
   const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
   const res = await fetch(`${ASAAS_API_URL}/payments`, {
@@ -209,4 +206,99 @@ export async function getAsaasPixQrCode(
   }
 
   return await res.json();
+}
+
+/**
+ * Cria cobrança Pix direta ou Link de Pagamento no Asaas (com fallback automático se faltar CPF)
+ */
+export async function createAsaasPixPaymentOrLink(
+  apiKey: string,
+  {
+    customerId,
+    value = 49.90,
+    externalReference,
+    description = "Música Personalizada - Produção Final e Playbacks",
+  }: {
+    customerId: string;
+    value?: number;
+    externalReference: string;
+    description?: string;
+  }
+): Promise<{
+  id: string;
+  invoiceUrl: string;
+  pixCode?: string;
+  isLink: boolean;
+}> {
+  // 1. Tenta criar cobrança Pix direta
+  try {
+    const dueDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const res = await fetch(`${ASAAS_API_URL}/payments`, {
+      method: "POST",
+      headers: asaasHeaders(apiKey),
+      body: JSON.stringify({
+        customer: customerId,
+        billingType: "PIX",
+        value,
+        dueDate,
+        description,
+        externalReference,
+        postalService: false,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+
+    if (res.ok) {
+      const paymentData = await res.json();
+      try {
+        const pixQr = await getAsaasPixQrCode(apiKey, paymentData.id);
+        return {
+          id: paymentData.id,
+          invoiceUrl: paymentData.invoiceUrl,
+          pixCode: pixQr.payload,
+          isLink: false,
+        };
+      } catch (pixErr) {
+        return {
+          id: paymentData.id,
+          invoiceUrl: paymentData.invoiceUrl,
+          isLink: false,
+        };
+      }
+    }
+
+    const errText = await res.text();
+    console.warn(`Cobrança direta Asaas retornou status ${res.status}: ${errText}. Acionando fallback para Link de Pagamento.`);
+  } catch (directErr) {
+    console.warn("Erro ao tentar cobrança direta:", directErr);
+  }
+
+  // 2. Fallback: Cria Link de Pagamento Asaas (não exige CPF do cliente na criação)
+  const linkRes = await fetch(`${ASAAS_API_URL}/paymentLinks`, {
+    method: "POST",
+    headers: asaasHeaders(apiKey),
+    body: JSON.stringify({
+      name: "Música Personalizada - Produção Final",
+      description: "Liberação das faixas em alta definição e playbacks",
+      value,
+      billingType: "PIX",
+      chargeType: "DETACHED",
+      dueDateLimitDays: 2,
+      externalReference,
+      notificationEnabled: false,
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!linkRes.ok) {
+    const linkErr = await linkRes.text();
+    throw new Error(`Falha ao criar cobrança no Asaas (${linkRes.status}): ${linkErr}`);
+  }
+
+  const linkData = await linkRes.json();
+  return {
+    id: linkData.id,
+    invoiceUrl: linkData.url,
+    isLink: true,
+  };
 }
