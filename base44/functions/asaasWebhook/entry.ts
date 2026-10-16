@@ -11,6 +11,9 @@ import {
 
 const ASAAS_API_URL = "https://api.asaas.com/v3";
 
+// Trava em memória contra disparos duplicados simultâneos de webhook do Asaas
+const processedPaymentsMap = new Map<string, number>();
+
 export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
@@ -51,6 +54,20 @@ export default async function(req: Request) {
   }
 
   const paymentId = payment?.id || body?.paymentId;
+  if (!paymentId) {
+    return Response.json({ error: "paymentId não informado no payload" }, { status: 400 });
+  }
+
+  // Idempotência em memória (se o mesmo paymentId foi processado nos últimos 10 minutos)
+  const now = Date.now();
+  const lastProcessed = processedPaymentsMap.get(paymentId);
+  if (lastProcessed && (now - lastProcessed) < 10 * 60 * 1000 && !body?.force) {
+    return Response.json({
+      ignored: true,
+      reason: `Entrega para a cobrança ${paymentId} já foi disparada recentemente.`,
+    });
+  }
+
   let rawPhone = payment?.externalReference || body?.phone;
 
   // 2. Se o telefone não veio no externalReference, consulta o cliente no Asaas
@@ -78,7 +95,7 @@ export default async function(req: Request) {
     }, { status: 400 });
   }
 
-  // 3. Atualiza registro da cobrança no banco
+  // 3. Atualiza registro da cobrança no banco e verifica se já foi entregue
   let paymentEntityId: string | null = null;
   if (base44?.asServiceRole?.entities?.MusicPayment) {
     try {
@@ -87,6 +104,13 @@ export default async function(req: Request) {
       });
       if (records && records.length > 0) {
         paymentEntityId = records[0].id;
+        if (records[0].status === "delivered" && !body?.force) {
+          processedPaymentsMap.set(paymentId, now);
+          return Response.json({
+            ignored: true,
+            reason: `Entrega da cobrança ${paymentId} já havia sido concluída anteriormente.`,
+          });
+        }
         await base44.asServiceRole.entities.MusicPayment.update(paymentEntityId, {
           status: "paid",
         });
@@ -95,6 +119,8 @@ export default async function(req: Request) {
       console.error("Erro ao atualizar status pago no MusicPayment:", err);
     }
   }
+
+  processedPaymentsMap.set(paymentId, now);
 
   const deliveryLog: any = {
     payment_id: paymentId,
