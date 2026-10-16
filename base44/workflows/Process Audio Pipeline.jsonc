@@ -684,7 +684,7 @@
               "vocal2_uri": "${ .store_v2.file_uri }"
             }
           },
-          "then": "send",
+          "then": "end",
           "x-base44": {
             "title": "Processar e sincronizar",
             "description": "Alinhar + mixar"
