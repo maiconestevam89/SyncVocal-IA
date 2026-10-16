@@ -27,6 +27,7 @@ export interface AsaasPayment {
   invoiceUrl: string;
   externalReference?: string;
   description?: string;
+  dateCreated?: string;
 }
 
 export interface AsaasPixQrCode {
@@ -70,6 +71,47 @@ export async function findOrCreateAsaasCustomer(
   }
 
   return await createRes.json();
+}
+
+/**
+ * Busca se já existe uma cobrança PENDENTE ativa no Asaas para este cliente ou telefone.
+ * Evita geração repetida de cobranças para o mesmo pedido.
+ */
+export async function findPendingAsaasPayment(
+  apiKey: string,
+  { customerId, externalReference }: { customerId?: string; externalReference?: string }
+): Promise<AsaasPayment | null> {
+  try {
+    if (externalReference) {
+      const res = await fetch(`${ASAAS_API_URL}/payments?externalReference=${encodeURIComponent(externalReference)}&status=PENDING&limit=1`, {
+        headers: asaasHeaders(apiKey),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        const list = await res.json();
+        if (list?.data && list.data.length > 0) {
+          return list.data[0];
+        }
+      }
+    }
+
+    if (customerId) {
+      const res = await fetch(`${ASAAS_API_URL}/payments?customer=${encodeURIComponent(customerId)}&status=PENDING&limit=1`, {
+        headers: asaasHeaders(apiKey),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        const list = await res.json();
+        if (list?.data && list.data.length > 0) {
+          return list.data[0];
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Aviso ao buscar cobrança pendente existente no Asaas:", err);
+  }
+
+  return null;
 }
 
 export async function createAsaasPixPayment(
