@@ -21,6 +21,61 @@ function truncate(obj, max = 2000) {
   return str.length > max ? str.slice(0, max) : str;
 }
 
+// Dispara um bot no Umbler Talk testando a assinatura oficial e variações caso retorne 404
+async function invokeStartBot({ apiToken, botId, orgId, triggerName, channelPhone, customerPhone }) {
+  const attempts = [
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot/`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: channelPhone, fromPhone: customerPhone },
+      label: "oficial_com_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: channelPhone, fromPhone: customerPhone },
+      label: "oficial_sem_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot/`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: customerPhone, fromPhone: channelPhone },
+      label: "invertido_com_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: customerPhone, fromPhone: channelPhone },
+      label: "invertido_sem_barra",
+    },
+  ];
+
+  let lastStatus = 0;
+  let lastData = null;
+
+  for (const att of attempts) {
+    try {
+      const res = await fetch(att.url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(att.body),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      lastStatus = res.status;
+      try { lastData = await res.json(); } catch { lastData = await res.text(); }
+
+      if (res.ok) {
+        return { ok: true, status: lastStatus, data: lastData, attempt: att.label };
+      }
+    } catch (err) {
+      lastStatus = 500;
+      lastData = err.message;
+    }
+  }
+
+  return { ok: false, status: lastStatus, data: lastData };
+}
+
 export default async function(req) {
   let job_id = null;
   try {
@@ -41,7 +96,7 @@ export default async function(req) {
       return Response.json({
         success: false,
         error: `Não foi possível extrair um telefone válido do nome "${audio1_name}". ` +
-               "O nome do Áudio 1 precisa conter o telefone com DDD (ex: 11 98803-2049 - MUSICA 01.mp3) e tente novamente.",
+               "O nome do arquivo precisa conter o telefone com DDD (ex: 11 98803-2049 - MUSICA 01.mp3) e tente novamente.",
       }, { status: 400 });
     }
 
@@ -64,63 +119,46 @@ export default async function(req) {
       return Response.json({ error: "Credenciais do Umbler Talk não configuradas nos secrets.", debug }, { status: 500 });
     }
 
-    const logs = { phone: customerPhone, step1: null, step2: null, debug };
+    const logs = { phone: customerPhone, step1: null, step2: null, step3: null, debug };
 
     if (job_id) {
       try { await base44.asServiceRole.entities.ProcessingJob.update(job_id, { status: "sending" }); } catch {}
     }
 
     // ETAPA 1: Iniciar o chatbot "Música pronta"
-    // Apesar da documentação dizer toPhone=canal, o comportamento real da API é o mesmo
-    // do endpoint de mensagens: toPhone = destino (cliente), fromPhone = origem (canal).
-    // Confirmado pelos logs: com toPhone=customerPhone a Etapa 1 retorna 200.
-    const step1Body = {
+    const step1Result = await invokeStartBot({
+      apiToken,
       botId,
-      organizationId: orgId,
+      orgId,
       triggerName,
-      toPhone: customerPhone,
-      fromPhone: channelPhone,
-    };
-
-    const step1Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(step1Body),
-      signal: AbortSignal.timeout(30000),
+      channelPhone,
+      customerPhone,
     });
-
-    const step1Status = step1Res.status;
-    let step1Data;
-    try { step1Data = await step1Res.json(); } catch { step1Data = await step1Res.text(); }
-    logs.step1 = { status: step1Status, ok: step1Res.ok, data: step1Data };
+    logs.step1 = step1Result;
 
     // Se a Etapa 1 FALHAR: interromper e NÃO enviar o arquivo de áudio
-    if (!step1Res.ok) {
+    if (!step1Result.ok) {
+      const errDetail = typeof step1Result.data === "object" ? JSON.stringify(step1Result.data) : String(step1Result.data || "");
       await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "failed",
-        step1_http_status: step1Status,
-        step1_response: truncate(step1Data),
+        step1_http_status: step1Result.status,
+        step1_response: truncate(errDetail),
         step2_http_status: 0,
         step2_response: "",
-        error_message: `Etapa 1 (chatbot) falhou com HTTP ${step1Status}`,
+        error_message: `Etapa 1 (chatbot) falhou com HTTP ${step1Result.status}: ${errDetail}`,
       });
       return Response.json({
         success: false,
         phone: customerPhone,
-        error: `Etapa 1 falhou: o chatbot não pôde ser iniciado (HTTP ${step1Status}). O arquivo de áudio não foi enviado.`,
+        error: `Etapa 1 falhou: o chatbot não pôde ser iniciado (HTTP ${step1Result.status}). Detalhes: ${errDetail}`,
         logs,
       }, { status: 502 });
     }
 
     // ETAPA 2: Enviar o arquivo de mídia (prévia de 1:10)
     // Executada EXCLUSIVAMENTE após a confirmação de sucesso da Etapa 1.
-    // No endpoint simplified: ToPhone = destino (cliente), FromPhone = origem (canal)
-
     // Pausa de 15s para o chatbot enviar todas as mensagens de saudação antes do áudio chegar
     await new Promise((r) => setTimeout(r, 15000));
 
@@ -130,8 +168,8 @@ export default async function(req) {
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started",
-        step1_http_status: step1Status,
-        step1_response: truncate(step1Data),
+        step1_http_status: step1Result.status,
+        step1_response: truncate(step1Result.data),
         step2_http_status: 0,
         step2_response: "",
         error_message: `Falha ao baixar o arquivo de prévia (HTTP ${audioRes.status})`,
@@ -165,70 +203,58 @@ export default async function(req) {
     logs.step2 = { status: step2Status, ok: step2Res.ok, data: step2Data };
 
     if (!step2Res.ok) {
+      const errDetail = typeof step2Data === "object" ? JSON.stringify(step2Data) : String(step2Data || "");
       await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started",
-        step1_http_status: step1Status,
-        step1_response: truncate(step1Data),
+        step1_http_status: step1Result.status,
+        step1_response: truncate(step1Result.data),
         step2_http_status: step2Status,
         step2_response: truncate(step2Data),
-        error_message: `Etapa 2 (envio de mídia) falhou com HTTP ${step2Status}`,
+        error_message: `Etapa 2 (envio de mídia) falhou com HTTP ${step2Status}: ${errDetail}`,
       });
       return Response.json({
         success: false,
         phone: customerPhone,
-        error: `Etapa 1 OK, mas Etapa 2 falhou: envio de mídia não concluído (HTTP ${step2Status}).`,
+        error: `Etapa 1 OK, mas Etapa 2 falhou: envio de mídia não concluído (HTTP ${step2Status}). Detalhes: ${errDetail}`,
         logs,
       }, { status: 502 });
     }
 
     // ETAPA 3: Disparar o chatbot "Pendente de pagamento" após o envio da prévia
-    // Mesma lógica da Etapa 1: toPhone = cliente, fromPhone = canal.
     // Pausa de 10s para o cliente receber e ouvir a prévia antes do bot de pagamento
     await new Promise((r) => setTimeout(r, 10000));
 
     const paymentBotId = "aaRxg5RS5vxsTe8j";
     const paymentTriggerName = "Pendente de pagamento";
 
-    const step3Body = {
+    const step3Result = await invokeStartBot({
+      apiToken,
       botId: paymentBotId,
-      organizationId: orgId,
+      orgId,
       triggerName: paymentTriggerName,
-      toPhone: customerPhone,
-      fromPhone: channelPhone,
-    };
-
-    const step3Res = await fetch(`${UTALK_BASE}/v1/chats/start-bot/`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(step3Body),
-      signal: AbortSignal.timeout(30000),
+      channelPhone,
+      customerPhone,
     });
+    logs.step3 = step3Result;
 
-    const step3Status = step3Res.status;
-    let step3Data;
-    try { step3Data = await step3Res.json(); } catch { step3Data = await step3Res.text(); }
-    logs.step3 = { status: step3Status, ok: step3Res.ok, data: step3Data };
-
-    if (!step3Res.ok) {
+    if (!step3Result.ok) {
+      const errDetail = typeof step3Result.data === "object" ? JSON.stringify(step3Result.data) : String(step3Result.data || "");
       await base44.asServiceRole.entities.UmblerTalkLog.create({
         audio1_name,
         phone: customerPhone,
         status: "chatbot_started_and_preview_sent",
-        step1_http_status: step1Status,
-        step1_response: truncate(step1Data),
+        step1_http_status: step1Result.status,
+        step1_response: truncate(step1Result.data),
         step2_http_status: step2Status,
         step2_response: truncate(step2Data),
-        error_message: `Etapa 3 (bot Pendente de pagamento) falhou com HTTP ${step3Status}`,
+        error_message: `Etapa 3 (bot Pendente de pagamento) falhou com HTTP ${step3Result.status}: ${errDetail}`,
       });
       return Response.json({
         success: false,
         phone: customerPhone,
-        error: `Etapas 1 e 2 OK, mas Etapa 3 falhou: bot "Pendente de pagamento" não iniciado (HTTP ${step3Status}).`,
+        error: `Etapas 1 e 2 OK, mas Etapa 3 falhou: bot "Pendente de pagamento" não iniciado (HTTP ${step3Result.status}). Detalhes: ${errDetail}`,
         logs,
       }, { status: 502 });
     }
@@ -238,8 +264,8 @@ export default async function(req) {
       audio1_name,
       phone: customerPhone,
       status: "chatbot_started_and_preview_sent",
-      step1_http_status: step1Status,
-      step1_response: truncate(step1Data),
+      step1_http_status: step1Result.status,
+      step1_response: truncate(step1Result.data),
       step2_http_status: step2Status,
       step2_response: truncate(step2Data),
       error_message: "",
