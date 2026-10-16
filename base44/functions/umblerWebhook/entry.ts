@@ -6,6 +6,7 @@ import {
   createAsaasPixPayment,
   getAsaasPixQrCode,
   findPendingAsaasPayment,
+  findRecentPaidAsaasPayment,
 } from '../../shared/asaas.ts';
 
 // Mapa em memória para evitar rajadas simultâneas (debounce de 2 minutos por telefone)
@@ -39,7 +40,7 @@ export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
-      description: "Webhook do Umbler Talk com proteção anti-loop e idempotência para o bot 'Pendente de pagamento'",
+      description: "Webhook do Umbler Talk v2 (proteção anti-loop, anti-replay e idempotência de pagamento)",
     });
   }
 
@@ -60,18 +61,26 @@ export default async function(req: Request) {
   const allStrings = extractAllStrings(body);
   const normalizedStrings = allStrings.map(normalizeString);
 
-  // TRAVA 1: Rejeitar mensagens do próprio sistema / Pix para evitar auto-gatilho e loop infinito
+  // TRAVA 1: Rejeitar mensagens do sistema, confirmações e mídias para evitar auto-gatilho e loop infinito
   const isSelfSystemMessage = normalizedStrings.some(s =>
     s.includes("aqui esta o seu pix para liberacao") ||
     s.includes("codigo pix copia e cola") ||
     s.includes("ou pague pelo link") ||
-    s.includes("assim que o pagamento for identificado")
+    s.includes("assim que o pagamento for identificado") ||
+    s.includes("pagamento confirmado") ||
+    s.includes("aqui estao suas musicas") ||
+    s.includes(".mp3") ||
+    s.includes(".wav") ||
+    s.includes("final 01") ||
+    s.includes("final 02") ||
+    s.includes("playback 01") ||
+    s.includes("playback 02")
   );
 
   if (isSelfSystemMessage && !body?.force) {
     return Response.json({
       ignored: true,
-      reason: "Mensagem emitida pelo próprio sistema de pagamento (descartada para prevenir loop infinito).",
+      reason: "Mensagem ou mídia do próprio sistema / confirmação de entrega (descartada para prevenir loop infinito).",
     });
   }
 
@@ -171,14 +180,33 @@ export default async function(req: Request) {
   }
 
   try {
-    // TRAVA 4: Idempotência no banco de dados Base44 (MusicPayment)
-    // Se já existir cobrança pendente ou criada nos últimos 15 minutos, NÃO criar nem reenviar!
+    // TRAVA 4: Verificação no banco de dados Base44 (MusicPayment)
+    // Se o cliente já PAGOU recentemente (status: 'paid' ou 'delivered' nas últimas 24h), BLOQUEAR!
+    // Se o cliente tem cobrança PENDENTE ativa, REUTILIZAR e NÃO criar nova!
     if (base44?.asServiceRole?.entities?.MusicPayment && !body?.force) {
       try {
         const existingRecords = await base44.asServiceRole.entities.MusicPayment.filter({
           phone_digits: phoneInfo.digits,
         });
 
+        // 4.1 Trava de pagamento já concluído
+        const alreadyPaid = existingRecords?.find((rec: any) => {
+          if (rec.status === "paid" || rec.status === "delivered") {
+            const time = rec.updated_at || rec.created_at ? new Date(rec.updated_at || rec.created_at).getTime() : 0;
+            return (now - time) < 24 * 60 * 60 * 1000; // 24 horas
+          }
+          return false;
+        });
+
+        if (alreadyPaid) {
+          phoneDebounceMap.set(phoneInfo.digits, now);
+          return Response.json({
+            ignored: true,
+            reason: `Cliente já realizou o pagamento desta música (Status: ${alreadyPaid.status}, ID: ${alreadyPaid.asaas_payment_id}). Nenhuma nova cobrança pode ser gerada.`,
+          });
+        }
+
+        // 4.2 Trava de cobrança pendente existente
         const pendingOrRecent = existingRecords?.find((rec: any) => {
           if (rec.status === "pending") return true;
           const createdTime = rec.created_at ? new Date(rec.created_at).getTime() : 0;
@@ -186,9 +214,7 @@ export default async function(req: Request) {
         });
 
         if (pendingOrRecent) {
-          // Atualiza debounce para segurar próximas chamadas
           phoneDebounceMap.set(phoneInfo.digits, now);
-
           return Response.json({
             ignored: true,
             reason: `Cobrança já ativa para este telefone no sistema (Status: ${pendingOrRecent.status}, ID: ${pendingOrRecent.asaas_payment_id}). Cooldown ativo para evitar cobranças repetidas.`,
@@ -207,8 +233,21 @@ export default async function(req: Request) {
       phoneDigits: phoneInfo.digits,
     });
 
-    // TRAVA 5: Idempotência na API do Asaas
-    // Verifica se já existe uma cobrança PENDENTE para este telefone ou cliente
+    // TRAVA 5: Checagem no Asaas se já foi PAGO recentemente
+    const recentPaid = await findRecentPaidAsaasPayment(asaasApiKey, {
+      customerId: customer.id,
+      externalReference: phoneInfo.digits,
+    });
+
+    if (recentPaid && !body?.force) {
+      phoneDebounceMap.set(phoneInfo.digits, now);
+      return Response.json({
+        ignored: true,
+        reason: `Pagamento já confirmado no Asaas recentemente (${recentPaid.id}, Status: ${recentPaid.status}). Nenhuma nova cobrança gerada.`,
+      });
+    }
+
+    // TRAVA 6: Idempotência na API do Asaas para cobrança PENDENTE
     let payment = await findPendingAsaasPayment(asaasApiKey, {
       customerId: customer.id,
       externalReference: phoneInfo.digits,
@@ -252,7 +291,6 @@ export default async function(req: Request) {
     }
 
     // 6. Envia mensagem com código Pix via Umbler Talk APENAS se for uma cobrança nova
-    // Se a cobrança já existia, NÃO reenvia mensagem para não lotar o chat do cliente
     let umblerSendResult: any = null;
     if (isNewPayment && umblerToken && umblerOrgId && umblerChannelPhone) {
       const pixMessage =
