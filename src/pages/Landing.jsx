@@ -38,7 +38,6 @@ export default function Landing() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
 
-  // Estados para os 4 arquivos (Versão 1 e 2: Voz da IA + Playback)
   const [v1VocalFile, setV1VocalFile] = useState(null);
   const [v1VocalUri, setV1VocalUri] = useState(null);
 
@@ -219,13 +218,13 @@ export default function Landing() {
 
     const t2 = setTimeout(() => {
       setPipelineStep(3);
-      setPipelineMessage("Limpando e masterizando a voz do cliente no Music.ai...");
-    }, 12000);
+      setPipelineMessage(isPreGen ? "Utilizando voz do cliente diretamente..." : "Limpando e masterizando a voz do cliente no Music.ai...");
+    }, 8000);
 
     const t3 = setTimeout(() => {
       setPipelineStep(4);
-      setPipelineMessage("Sincronizando e mixando a voz masterizada nas 2 versões (DSP)...");
-    }, 24000);
+      setPipelineMessage("Sincronizando e mixando a voz nas 2 versões (DSP)...");
+    }, 15000);
 
     try {
       const payload = {
@@ -315,7 +314,7 @@ export default function Landing() {
                 </span>
               </h1>
               <p className="text-slate-400 text-sm md:text-base max-w-2xl mx-auto">
-                Cante ou anexe sua voz. O sistema masteriza seus vocais, sincroniza com os playbacks e entrega os arquivos prontos para lançamento.
+                Cante ou anexe sua voz. O sistema sincroniza seus vocais com os playbacks e entrega os arquivos prontos para lançamento.
               </p>
             </div>
 
@@ -542,7 +541,7 @@ export default function Landing() {
                       </AlertDescription>
                     </Alert>
 
-                    {/* Versão 01: Vocal + Playback */}
+                    {/* Versão 01 */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
                       <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Stems Separados)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -586,7 +585,7 @@ export default function Landing() {
                       </div>
                     </div>
 
-                    {/* Versão 02: Vocal + Playback */}
+                    {/* Versão 02 */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
                       <h4 className="font-bold text-sm text-purple-300">Versão 02 (Stems Separados)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -658,6 +657,16 @@ export default function Landing() {
               <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
               <p className="text-sm text-slate-400">{pipelineMessage}</p>
             </div>
+            <Card className="bg-slate-900 border-slate-800 p-6 space-y-4 shadow-2xl">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-slate-400">
+                  <span>Progresso Geral</span>
+                  <span>{Math.round((pipelineStep / totalSteps) * 100)}%</span>
+                </div>
+                <Progress value={(pipelineStep / totalSteps) * 100} className="h-2.5 bg-slate-950" />
+                <p className="text-xs text-indigo-400 font-medium text-center pt-2">{pipelineMessage}</p>
+              </div>
+            </Card>
           </div>
         )}
 
@@ -668,6 +677,81 @@ export default function Landing() {
                 <CheckCircle2 className="w-8 h-8" />
               </div>
               <h2 className="text-3xl font-extrabold text-white">Sua Produção Está Pronta!</h2>
+              <p className="text-sm text-slate-400 max-w-xl mx-auto">
+                Todas as faixas foram mixadas, sincronizadas e preparadas com sucesso. Ouça e baixe abaixo:
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <FileMusic className="w-5 h-5 text-indigo-400" /> Central de Downloads da Produção
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card className="bg-slate-900 border-indigo-500/40 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-indigo-300 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz do Cliente (Sincronizada)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Voz limpa unida aos instrumentais</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.final_voz_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>FINAL COM VOZ 01 (WAV)</span>
+                          <a href={jobResults.downloads.final_voz_1} download className="text-indigo-400 hover:underline">Baixar WAV</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.final_voz_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>FINAL COM VOZ 02 (WAV)</span>
+                          <a href={jobResults.downloads.final_voz_2} download className="text-indigo-400 hover:underline">Baixar WAV</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-slate-900 border-slate-800 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-amber-300 flex items-center gap-2">
+                      <Headphones className="w-4 h-4 text-amber-400" /> Playbacks Instrumentais
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Instrumentais isolados para shows e apresentações</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.playback_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>PLAYBACK 01</span>
+                          <a href={jobResults.downloads.playback_1} download className="text-amber-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.playback_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>PLAYBACK 02</span>
+                          <a href={jobResults.downloads.playback_2} download className="text-amber-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <div className="flex justify-center pt-4">
+              <Button onClick={() => setFlowStage("initial")} variant="outline" className="border-slate-700 text-slate-200 gap-2">
+                <RotateCcw className="w-4 h-4" /> Produzir Outra Música
+              </Button>
             </div>
           </div>
         )}
