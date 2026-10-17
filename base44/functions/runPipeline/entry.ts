@@ -91,7 +91,7 @@ export default async function (req: Request): Promise<Response> {
     currentStep = "Download da voz do cliente";
     const { signed_url: clientSignedUrl } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
       file_uri: client_audio_uri,
-      expires_in: 7200,
+      expires_in: 3600,
     });
     const clientAudioBuffer = await fetchBuffer(clientSignedUrl);
 
@@ -113,11 +113,11 @@ export default async function (req: Request): Promise<Response> {
       const [{ signed_url: v1SignedUrl }, { signed_url: v2SignedUrl }] = await Promise.all([
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
           file_uri: pre_generated_v1_uri,
-          expires_in: 7200,
+          expires_in: 3600,
         }),
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
           file_uri: pre_generated_v2_uri,
-          expires_in: 7200,
+          expires_in: 3600,
         }),
       ]);
 
