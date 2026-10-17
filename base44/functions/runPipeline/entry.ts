@@ -55,7 +55,7 @@ Deno.serve(async (req: Request) => {
     );
 
     const musicAiKey = secrets.get("MUSIC_AI_API_KEY") || process.env["MUSIC_AI_API_KEY"];
-    if (!musicAiKey || !musicAiKey.trim()) {
+    if (!hasDirectStems && (!musicAiKey || !musicAiKey.trim())) {
       return Response.json({ success: false, error: "Chave MUSIC_AI_API_KEY ausente." }, { status: 200 });
     }
 
@@ -162,26 +162,32 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    currentStep = "Limpeza da voz do cliente no Music.ai";
-    await updateStatus("cleaning_vocals");
-    const { fileReference: clientFileRef } = await uploadToMusicAi(clientAudioBuffer, "audio/mpeg");
-    const cleanVocalsUrl = await cleanupCustomerVocal(clientFileRef, `Cleanup ${customerPhoneStr}`);
+    let clientMasteredBuffer: ArrayBuffer;
 
-    currentStep = "Masterização da voz no Music.ai";
-    await updateStatus("mastering_vocal");
-    const aiMasteredUrl = await masterCustomerVocal(cleanVocalsUrl, `Master ${customerPhoneStr}`);
+    if (hasDirectStems) {
+      currentStep = "Usando voz do cliente diretamente (Music.ai ignorado)";
+      clientMasteredBuffer = clientAudioBuffer;
+    } else {
+      currentStep = "Limpeza da voz do cliente no Music.ai";
+      await updateStatus("cleaning_vocals");
+      const { fileReference: clientFileRef } = await uploadToMusicAi(clientAudioBuffer, "audio/mpeg");
+      const cleanVocalsUrl = await cleanupCustomerVocal(clientFileRef, `Cleanup ${customerPhoneStr}`);
+
+      currentStep = "Masterização da voz no Music.ai";
+      await updateStatus("mastering_vocal");
+      const aiMasteredUrl = await masterCustomerVocal(cleanVocalsUrl, `Master ${customerPhoneStr}`);
+      clientMasteredBuffer = await fetchBuffer(aiMasteredUrl);
+    }
 
     currentStep = "Sincronização e mixagem DSP";
     await updateStatus("mixing");
 
     const [
-      clientMasteredBuffer,
       v1VocalBuffer,
       v1InstBuffer,
       v2VocalBuffer,
       v2InstBuffer,
     ] = await Promise.all([
-      fetchBuffer(aiMasteredUrl),
       fetchBuffer(stems1.vocalUrl),
       fetchBuffer(stems1.instrumentalUrl),
       fetchBuffer(stems2.vocalUrl),
