@@ -59,7 +59,7 @@ export default async function (req: Request): Promise<Response> {
     if (!musicAiKey || !musicAiKey.trim()) {
       return Response.json({
         success: false,
-        error: "Chave MUSIC_AI_API_KEY não configurada nos Secrets do Base44. Cadastre a chave do Music.ai em Settings > Secrets do Base44.",
+        error: "Chave MUSIC_AI_API_KEY não configurada nos Secrets do Base44.",
         missing_secret: "MUSIC_AI_API_KEY",
       });
     }
@@ -69,7 +69,7 @@ export default async function (req: Request): Promise<Response> {
       if (!sunoKey || !sunoKey.trim()) {
         return Response.json({
           success: false,
-          error: "Chave SUNO_API_KEY não configurada nos Secrets do Base44. Cadastre SUNO_API_KEY em Settings > Secrets ou use a opção 'Já possuo 2 versões de IA' anexando seus próprios arquivos.",
+          error: "Chave SUNO_API_KEY não configurada nos Secrets do Base44.",
           missing_secret: "SUNO_API_KEY",
         });
       }
@@ -106,7 +106,6 @@ export default async function (req: Request): Promise<Response> {
     let v2AudioUrl = "";
 
     if (hasPreGenerated) {
-      // ── FLUXO ALTERNATIVO: O usuário já possui 2 versões criadas por IA ──
       currentStep = "Carregando versões de IA fornecidas";
       await updateStatus("using_pregenerated", { message: "Utilizando versões de IA fornecidas..." });
 
@@ -137,13 +136,12 @@ export default async function (req: Request): Promise<Response> {
       }
 
       currentStep = "Separação de stems com Music.ai";
-      await updateStatus("separating_stems", { message: "Separando vocais e instrumentais das versões fornecidas..." });
+      await updateStatus("separating_stems", { message: "Separando vocais e instrumentais..." });
       [stems1, stems2] = await Promise.all([
         separateAudioWithMusicAi(sunoV1Buffer, "V1 Stems"),
         separateAudioWithMusicAi(sunoV2Buffer, "V2 Stems"),
       ]);
     } else {
-      // ── FLUXO PADRÃO: Transcrição e Geração no Suno ──
       currentStep = "Transcrição e organização da letra";
       await updateStatus("transcribing");
       const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
@@ -169,8 +167,6 @@ export default async function (req: Request): Promise<Response> {
       currentStep = "Separação de stems no Suno";
       await updateStatus("separating_stems", {
         suno_task_id: sunoTaskId,
-        suno_v1_audio_url: version1.audioUrl,
-        suno_v2_audio_url: version2.audioUrl,
       });
 
       const [stemTask1Id, stemTask2Id] = await Promise.all([
@@ -189,18 +185,18 @@ export default async function (req: Request): Promise<Response> {
       ]);
     }
 
-    // ── 4. FLUXO 4: Limpeza Vocal da voz do cliente (Music.ai) ──
+    // ── 4. Limpeza Vocal da voz do cliente (Music.ai) ──
     currentStep = "Limpeza da voz do cliente no Music.ai";
     await updateStatus("cleaning_vocals");
     const { fileReference: clientFileRef } = await uploadToMusicAi(clientAudioBuffer, "audio/mpeg");
     const cleanVocalsUrl = await cleanupCustomerVocal(clientFileRef, `Cleanup ${customerPhoneStr}`);
 
-    // ── 5. FLUXO 5: Masterização Vocal (Music.ai) ──
+    // ── 5. Masterização Vocal (Music.ai) ──
     currentStep = "Masterização da voz no Music.ai";
     await updateStatus("mastering_vocal");
     const aiMasteredUrl = await masterCustomerVocal(cleanVocalsUrl, `Master ${customerPhoneStr}`);
 
-    // ── 6. FLUXO 6: Sincronização e Mixagem Dupla (DSP) ──
+    // ── 6. Sincronização e Mixagem Dupla (DSP) ──
     currentStep = "Sincronização e mixagem DSP";
     await updateStatus("mixing");
 
@@ -224,7 +220,7 @@ export default async function (req: Request): Promise<Response> {
     const previaOriginal1Bytes = create70sPreviewMp3(sunoV1Buffer);
     const previaOriginal2Bytes = create70sPreviewMp3(sunoV2Buffer);
 
-    // ── 7. Upload para Storage privado (para download web) ──
+    // ── 7. Upload para Storage privado ──
     currentStep = "Upload das faixas finalizadas";
     const uploadPrivate = async (bytes: Uint8Array | ArrayBuffer, name: string, mime: string) => {
       const file = new File([new Blob([bytes instanceof ArrayBuffer ? bytes : bytes.buffer])], name, { type: mime });
@@ -257,7 +253,7 @@ export default async function (req: Request): Promise<Response> {
       uploadPrivate(v2InstBuffer, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
     ]);
 
-    // ── 8. FLUXO 7: Salvamento estruturado no Google Drive ──
+    // ── 8. Salvamento estruturado no Google Drive ──
     currentStep = "Organização no Google Drive";
     await updateStatus("uploading_drive");
 
@@ -290,7 +286,8 @@ export default async function (req: Request): Promise<Response> {
           uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - PREVIA 02.mp3`, previaOriginal2Bytes, "audio/mpeg"),
         ]);
       } catch (driveErr: any) {
-        console.warn("[Google Drive Upload warning]:", driveErr.message);
+        console.error("[Google Drive Upload error detail]:", driveErr);
+        throw new Error(`Google Drive Error: ${driveErr.message || driveErr}`);
       }
     }
 
@@ -351,11 +348,10 @@ export default async function (req: Request): Promise<Response> {
       } catch {}
     }
 
-    // Retorna HTTP 200 com { success: false, error: ... } para evitar Axios status 500 genérico no frontend
     return Response.json({
       success: false,
       error: `Erro na etapa [${currentStep}]: ${err.message || "Falha desconhecida"}`,
       step: currentStep,
-    });
+    }, { status: 200 });
   }
 }
