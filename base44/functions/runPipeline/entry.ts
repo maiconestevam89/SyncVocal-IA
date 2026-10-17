@@ -47,12 +47,15 @@ Deno.serve(async (req: Request) => {
       return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório." }, { status: 200 });
     }
 
+    // Agora basta ter a versão 1 obrigatória para o modo direto
     const hasDirectStems = Boolean(
       pre_generated_v1_vocal_uri &&
-      pre_generated_v1_instrumental_uri &&
-      pre_generated_v2_vocal_uri &&
-      pre_generated_v2_instrumental_uri
+      pre_generated_v1_instrumental_uri
     );
+
+    // Fallback: se a versão 2 não for enviada, usa a versão 1
+    const effectiveV2VocalUri = pre_generated_v2_vocal_uri || pre_generated_v1_vocal_uri;
+    const effectiveV2InstUri = pre_generated_v2_instrumental_uri || pre_generated_v1_instrumental_uri;
 
     const musicAiKey = secrets.get("MUSIC_AI_API_KEY") || process.env["MUSIC_AI_API_KEY"];
     if (!hasDirectStems && (!musicAiKey || !musicAiKey.trim())) {
@@ -107,8 +110,8 @@ Deno.serve(async (req: Request) => {
       ] = await Promise.all([
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_vocal_uri, expires_in: 3600 }),
         base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_instrumental_uri, expires_in: 3600 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_vocal_uri, expires_in: 3600 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_instrumental_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: effectiveV2VocalUri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: effectiveV2InstUri, expires_in: 3600 }),
       ]);
 
       stems1 = { vocalUrl: v1VocalSignedUrl, instrumentalUrl: v1InstSignedUrl };
@@ -194,8 +197,6 @@ Deno.serve(async (req: Request) => {
       fetchBuffer(stems2.instrumentalUrl),
     ]);
 
-    // O processador DSP exige ficheiros WAV com header RIFF. 
-    // Se os ficheiros enviados forem MP3, garantimos compatibilidade ou passamos para o DSP.
     const mix1 = await alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer);
     const mix2 = await alignAndMixTrackPair(v2VocalBuffer, clientMasteredBuffer, v2InstBuffer);
 
