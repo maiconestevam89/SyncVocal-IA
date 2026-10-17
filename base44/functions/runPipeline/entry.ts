@@ -1,6 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
-import { uploadToMusicAi, cleanupCustomerVocal, masterCustomerVocal } from '../../shared/musicAi.ts';
+import {
+  uploadToMusicAi,
+  cleanupCustomerVocal,
+  masterCustomerVocal,
+  separateAudioWithMusicAi,
+} from '../../shared/musicAi.ts';
 import {
   createSunoGenerationTask,
   pollSunoGeneration,
@@ -32,12 +37,21 @@ export default async function (req: Request): Promise<Response> {
   try {
     base44 = createClientFromRequest(req);
     const body = await req.json();
-    const { client_audio_uri, phone: rawPhone, style_choice = "Pop" } = body;
+    const {
+      client_audio_uri,
+      phone: rawPhone,
+      customer_name,
+      style_choice = "Pop",
+      pre_generated_v1_uri,
+      pre_generated_v2_uri,
+    } = body;
     jobId = body.job_id;
 
     if (!client_audio_uri) {
       return Response.json({ error: "client_audio_uri é obrigatório" }, { status: 400 });
     }
+
+    const hasPreGenerated = Boolean(pre_generated_v1_uri && pre_generated_v2_uri);
 
     const phoneInfo = extractPhone(rawPhone || "11988032049");
     const customerPhoneStr = phoneInfo?.formatted || rawPhone || "11 98803-2049";
@@ -58,42 +72,99 @@ export default async function (req: Request): Promise<Response> {
     });
     const clientAudioBuffer = await fetchBuffer(clientSignedUrl);
 
-    // ── 2. FLUXO 2: Transcrição e Geração no Suno ──
-    await updateStatus("transcribing");
-    const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
-    const organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
-    const musicPrompt = await generateMusicalPrompt(base44, style_choice);
+    let organizedLyrics = "Música Autoral - Letra em Produção";
+    let musicPrompt = style_choice;
+    let sunoV1Buffer: ArrayBuffer;
+    let sunoV2Buffer: ArrayBuffer;
+    let stems1: { vocalUrl: string; instrumentalUrl: string };
+    let stems2: { vocalUrl: string; instrumentalUrl: string };
+    let sunoTaskId: string = hasPreGenerated ? "pre_generated_by_user" : "";
+    let v1AudioUrl = "";
+    let v2AudioUrl = "";
 
-    await updateStatus("generating_suno", {
-      lyrics: organizedLyrics,
-      style_prompt: musicPrompt,
-    });
+    if (hasPreGenerated) {
+      // ── FLUXO ALTERNATIVO: O usuário já possui 2 versões criadas por IA ──
+      await updateStatus("using_pregenerated", { message: "Utilizando versões de IA fornecidas..." });
 
-    const sunoTaskId = await createSunoGenerationTask({
-      lyrics: organizedLyrics,
-      stylePrompt: musicPrompt,
-    });
+      const [{ signed_url: v1SignedUrl }, { signed_url: v2SignedUrl }] = await Promise.all([
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+          file_uri: pre_generated_v1_uri,
+          expires_in: 7200,
+        }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+          file_uri: pre_generated_v2_uri,
+          expires_in: 7200,
+        }),
+      ]);
 
-    // Suno gera obrigatoriamente 2 versões
-    const sunoResult = await pollSunoGeneration(sunoTaskId);
-    const { version1, version2 } = sunoResult;
+      v1AudioUrl = v1SignedUrl;
+      v2AudioUrl = v2SignedUrl;
 
-    // ── 3. FLUXO 3: Separação de Stems para as 2 versões ──
-    await updateStatus("separating_stems", {
-      suno_task_id: sunoTaskId,
-      suno_v1_audio_url: version1.audioUrl,
-      suno_v2_audio_url: version2.audioUrl,
-    });
+      // Baixa os áudios já gerados
+      [sunoV1Buffer, sunoV2Buffer] = await Promise.all([
+        fetchBuffer(v1SignedUrl),
+        fetchBuffer(v2SignedUrl),
+      ]);
 
-    const [stemTask1Id, stemTask2Id] = await Promise.all([
-      createSunoStemTask(sunoTaskId, version1.audioId),
-      createSunoStemTask(sunoTaskId, version2.audioId),
-    ]);
+      // Transcreve a letra a partir da voz do cliente ou do áudio da versão 1
+      try {
+        const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
+        organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
+      } catch (err: any) {
+        console.warn("[transcribe] aviso:", err.message);
+      }
 
-    const [stems1, stems2] = await Promise.all([
-      pollSunoStems(stemTask1Id),
-      pollSunoStems(stemTask2Id),
-    ]);
+      // Separa os stems das 2 versões com Music.ai
+      await updateStatus("separating_stems", { message: "Separando vocais e instrumentais das versões fornecidas..." });
+      [stems1, stems2] = await Promise.all([
+        separateAudioWithMusicAi(sunoV1Buffer, "V1 Stems"),
+        separateAudioWithMusicAi(sunoV2Buffer, "V2 Stems"),
+      ]);
+    } else {
+      // ── FLUXO PADRÃO: Transcrição e Geração no Suno ──
+      await updateStatus("transcribing");
+      const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
+      organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
+      musicPrompt = await generateMusicalPrompt(base44, style_choice);
+
+      await updateStatus("generating_suno", {
+        lyrics: organizedLyrics,
+        style_prompt: musicPrompt,
+      });
+
+      sunoTaskId = await createSunoGenerationTask({
+        lyrics: organizedLyrics,
+        stylePrompt: musicPrompt,
+      });
+
+      // Suno gera obrigatoriamente 2 versões
+      const sunoResult = await pollSunoGeneration(sunoTaskId);
+      const { version1, version2 } = sunoResult;
+      v1AudioUrl = version1.audioUrl;
+      v2AudioUrl = version2.audioUrl;
+
+      // ── Separação de Stems via Suno ──
+      await updateStatus("separating_stems", {
+        suno_task_id: sunoTaskId,
+        suno_v1_audio_url: version1.audioUrl,
+        suno_v2_audio_url: version2.audioUrl,
+      });
+
+      const [stemTask1Id, stemTask2Id] = await Promise.all([
+        createSunoStemTask(sunoTaskId, version1.audioId),
+        createSunoStemTask(sunoTaskId, version2.audioId),
+      ]);
+
+      [stems1, stems2] = await Promise.all([
+        pollSunoStems(stemTask1Id),
+        pollSunoStems(stemTask2Id),
+      ]);
+
+      [sunoV1Buffer, sunoV2Buffer] = await Promise.all([
+        fetchBuffer(version1.audioUrl),
+        fetchBuffer(version2.audioUrl),
+      ]);
+    }
 
     // ── 4. FLUXO 4: Limpeza Vocal da voz do cliente (Music.ai) ──
     await updateStatus("cleaning_vocals");
@@ -114,16 +185,12 @@ export default async function (req: Request): Promise<Response> {
       v1InstBuffer,
       v2VocalBuffer,
       v2InstBuffer,
-      sunoV1Buffer,
-      sunoV2Buffer,
     ] = await Promise.all([
       fetchBuffer(aiMasteredUrl),
       fetchBuffer(stems1.vocalUrl),
       fetchBuffer(stems1.instrumentalUrl),
       fetchBuffer(stems2.vocalUrl),
       fetchBuffer(stems2.instrumentalUrl),
-      fetchBuffer(version1.audioUrl),
-      fetchBuffer(version2.audioUrl),
     ]);
 
     // Mixagem Versão 1: Voz cliente masterizada + Instrumental 1 (alinhado ao vocal IA 1)
@@ -179,7 +246,6 @@ export default async function (req: Request): Promise<Response> {
       try {
         const driveToken = await getGoogleDriveAccessToken(serviceAccountJson);
 
-        // A - Meu Drive\MM Music\2026\Clientes\[Número do telefone do cliente]
         const customerFolder = await ensureFolderHierarchy(driveToken, [
           "MM Music",
           "2026",
@@ -188,7 +254,6 @@ export default async function (req: Request): Promise<Response> {
         ]);
         driveCustomerFolderId = customerFolder.id;
 
-        // B - Subpasta sequencial MUSICA 01, MUSICA 02, etc.
         const musicSubfolder = await createNextSequentialMusicSubfolder(driveToken, customerFolder.id);
         driveSubfolderName = musicSubfolder.name;
 
@@ -216,8 +281,8 @@ export default async function (req: Request): Promise<Response> {
       lyrics: organizedLyrics,
       style_prompt: musicPrompt,
       suno_task_id: sunoTaskId,
-      suno_v1_audio_url: version1.audioUrl,
-      suno_v2_audio_url: version2.audioUrl,
+      suno_v1_audio_url: v1AudioUrl,
+      suno_v2_audio_url: v2AudioUrl,
       suno_v1_playback_url: stems1.instrumentalUrl,
       suno_v2_playback_url: stems2.instrumentalUrl,
       final_v1_uri: finalOrig1Upload.file_uri,
