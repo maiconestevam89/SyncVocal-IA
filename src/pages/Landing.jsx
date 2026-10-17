@@ -23,6 +23,11 @@ import {
   Sliders,
   Layers,
   Wand2,
+  AlertTriangle,
+  KeyRound,
+  Check,
+  X,
+  HelpCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -87,7 +92,7 @@ export default function Landing() {
   const [uploadingPreGen, setUploadingPreGen] = useState(false);
 
   // ── Estados de Fluxo & Pipeline ──
-  // "initial" | "checking_copyright" | "copyright_blocked" | "processing" | "ready"
+  // "initial" | "checking_copyright" | "copyright_blocked" | "processing" | "ready" | "error"
   const [flowStage, setFlowStage] = useState("initial");
   const [copyrightData, setCopyrightData] = useState(null);
   const [pipelineStep, setPipelineStep] = useState(0);
@@ -95,6 +100,12 @@ export default function Landing() {
   const [pipelineMessage, setPipelineMessage] = useState("");
   const [jobResults, setJobResults] = useState(null);
   const [formError, setFormError] = useState("");
+  const [detailedError, setDetailedError] = useState(null);
+
+  // Diagnóstico de Chaves
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [diagnosticsData, setDiagnosticsData] = useState(null);
 
   // Modal / Diálogo de envio de prévia (Fluxo 9)
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -129,6 +140,7 @@ export default function Landing() {
   const handleClientAudioSelected = async (file) => {
     if (!file) return;
     setFormError("");
+    setDetailedError(null);
     setClientAudioFile(file);
     setClientAudioUrl(URL.createObjectURL(file));
     setUploadingClientAudio(true);
@@ -157,6 +169,7 @@ export default function Landing() {
 
     setGeneratingPrompt(true);
     setFormError("");
+    setDetailedError(null);
     try {
       const res = await base44.functions.invoke("generateMusicPrompt", {
         styleSelection: inputStyle,
@@ -211,9 +224,28 @@ export default function Landing() {
     }
   };
 
+  // ── Diagnóstico de Integrações ──
+  const runDiagnostics = async () => {
+    setDiagnosticsLoading(true);
+    setShowDiagnostics(true);
+    try {
+      const res = await base44.functions.invoke("checkSystemStatus");
+      if (res.data?.success) {
+        setDiagnosticsData(res.data);
+      } else {
+        setDiagnosticsData({ error: res.data?.error || "Falha ao consultar status" });
+      }
+    } catch (err) {
+      setDiagnosticsData({ error: err.message || "Erro na chamada de diagnóstico" });
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  };
+
   // ── Validação e Início da Produção ──
   const handleStartProduction = async () => {
     setFormError("");
+    setDetailedError(null);
 
     if (!phone || phone.replace(/\D/g, "").length < 10) {
       setFormError("Por favor, informe um WhatsApp válido com DDD.");
@@ -232,7 +264,6 @@ export default function Landing() {
       }
     }
 
-    // Garante que o arquivo da voz esteja no storage
     let activeClientUri = clientAudioUri;
     if (!activeClientUri && clientAudioFile) {
       setUploadingClientAudio(true);
@@ -241,14 +272,13 @@ export default function Landing() {
         activeClientUri = file_uri;
         setClientAudioUri(file_uri);
       } catch (err) {
-        setFormError("Erro ao enviar arquivo da voz. Tente novamente.");
+        setFormError("Erro ao enviar arquivo da voz para o servidor. Tente novamente.");
         setUploadingClientAudio(false);
         return;
       }
       setUploadingClientAudio(false);
     }
 
-    // Se estiver no Modo B, garante upload das duas versões
     let v1Uri = preGenV1Uri;
     let v2Uri = preGenV2Uri;
     if (arrangementMode === "pre_generated") {
@@ -289,7 +319,6 @@ export default function Landing() {
       }
     } catch (err) {
       console.warn("Aviso na verificação de direitos autorais:", err);
-      // Continua se falha de rede temporária
     }
 
     // Prossegue para o pipeline
@@ -301,6 +330,7 @@ export default function Landing() {
     setClientAudioUrl(null);
     setClientAudioUri(null);
     setCopyrightData(null);
+    setDetailedError(null);
     setFlowStage("initial");
   };
 
@@ -313,9 +343,8 @@ export default function Landing() {
     const styleToUse = generatedPrompt.trim() || customStyle.trim() || selectedStyle;
 
     setPipelineStep(1);
-    setPipelineMessage("Verificação de direitos autorais aprovada.");
+    setPipelineMessage("Iniciando esteira musical...");
 
-    // Atualização de mensagens em etapas
     const t1 = setTimeout(() => {
       setPipelineStep(2);
       setPipelineMessage(
@@ -323,7 +352,7 @@ export default function Landing() {
           ? "Carregando versões de IA fornecidas (criação no Suno dispensada)..."
           : "Transcrevendo áudio com Gemini e gerando prompt no Suno..."
       );
-    }, 4000);
+    }, 3000);
 
     const t2 = setTimeout(() => {
       setPipelineStep(3);
@@ -372,12 +401,28 @@ export default function Landing() {
         setPipelineMessage("Produção finalizada com sucesso!");
         setFlowStage("ready");
       } else {
-        throw new Error(res.data?.error || "Falha na produção");
+        const errorMsg = res.data?.error || "Falha na produção do áudio";
+        throw new Error(errorMsg);
       }
     } catch (err) {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
+      clearTimeout(t5);
+
       console.error("Erro no pipeline:", err);
-      alert(`Ocorreu um erro no processamento: ${err.message}`);
-      setFlowStage("initial");
+      const serverError =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        err.message ||
+        "Erro de processamento";
+
+      setDetailedError({
+        message: serverError,
+        step: pipelineMessage,
+      });
+      setFlowStage("error");
     }
   };
 
@@ -431,10 +476,21 @@ export default function Landing() {
               <span className="block text-xs text-slate-400 font-medium">MM Music Studio</span>
             </div>
           </div>
-          <Badge variant="outline" className="border-indigo-500/30 text-indigo-400 bg-indigo-500/10 gap-1.5 py-1 px-3">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            Produção Musical Profissional
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runDiagnostics}
+              className="border-slate-700 bg-slate-900/80 text-xs text-slate-300 hover:text-white gap-1.5"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+              Diagnóstico de Chaves
+            </Button>
+            <Badge variant="outline" className="hidden sm:inline-flex border-indigo-500/30 text-indigo-400 bg-indigo-500/10 gap-1.5 py-1 px-3">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              Produção Musical Profissional
+            </Badge>
+          </div>
         </div>
       </header>
 
@@ -658,7 +714,6 @@ export default function Landing() {
                             type="button"
                             onClick={() => {
                               setSelectedStyle(style);
-                              // Atualiza prompt gerado quando seleciona tag
                               if (!customStyle) {
                                 setGeneratedPrompt("");
                               }
@@ -871,6 +926,49 @@ export default function Landing() {
           </div>
         )}
 
+        {/* TELA DE ERRO DETALHADO (SUBSTITUI O ALERT 500) */}
+        {flowStage === "error" && detailedError && (
+          <div className="space-y-6 max-w-2xl mx-auto py-8 animate-in zoom-in-95 duration-200">
+            <Alert variant="destructive" className="bg-red-950/70 border-red-800 text-red-200 p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <AlertTitle className="text-lg font-bold text-red-300">
+                    Falha no Processamento
+                  </AlertTitle>
+                  <AlertDescription className="text-sm text-red-200/90 leading-relaxed font-mono bg-red-950/90 p-3.5 rounded-lg border border-red-800/80 break-words">
+                    {detailedError.message}
+                  </AlertDescription>
+                </div>
+              </div>
+
+              <div className="pt-2 text-xs text-red-300/80 space-y-1">
+                <p>
+                  <strong>Dica:</strong> Se a mensagem indicar chave não configurada (ex: <code>SUNO_API_KEY</code> ou <code>MUSIC_AI_API_KEY</code>), adicione a chave no painel do Base44 em <em>Settings &gt; Environment Variables / Secrets</em>.
+                </p>
+              </div>
+            </Alert>
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button
+                variant="outline"
+                onClick={runDiagnostics}
+                className="border-slate-700 bg-slate-900 text-slate-200 hover:text-white gap-2"
+              >
+                <KeyRound className="w-4 h-4 text-indigo-400" />
+                Verificar Chaves / Diagnóstico
+              </Button>
+              <Button
+                onClick={() => setFlowStage("initial")}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Voltar à Tela Inicial
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* FLUXO 1: VERIFICAÇÃO DE DIREITOS AUTORAIS EM ANDAMENTO */}
         {flowStage === "checking_copyright" && (
           <div className="py-16 text-center space-y-6 animate-in fade-in duration-300">
@@ -1071,7 +1169,7 @@ export default function Landing() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {jobResults.downloads.final_voz_1 && (
+                    {jobResults.downloads?.final_voz_1 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - FINAL COM VOZ 01</span>
@@ -1083,7 +1181,7 @@ export default function Landing() {
                       </div>
                     )}
 
-                    {jobResults.downloads.final_voz_2 && (
+                    {jobResults.downloads?.final_voz_2 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - FINAL COM VOZ 02</span>
@@ -1109,7 +1207,7 @@ export default function Landing() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {jobResults.downloads.final_orig_1 && (
+                    {jobResults.downloads?.final_orig_1 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - FINAL 01</span>
@@ -1121,7 +1219,7 @@ export default function Landing() {
                       </div>
                     )}
 
-                    {jobResults.downloads.final_orig_2 && (
+                    {jobResults.downloads?.final_orig_2 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - FINAL 02</span>
@@ -1147,7 +1245,7 @@ export default function Landing() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {jobResults.downloads.playback_1 && (
+                    {jobResults.downloads?.playback_1 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - PLAYBACK 01</span>
@@ -1159,7 +1257,7 @@ export default function Landing() {
                       </div>
                     )}
 
-                    {jobResults.downloads.playback_2 && (
+                    {jobResults.downloads?.playback_2 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - PLAYBACK 02</span>
@@ -1185,7 +1283,7 @@ export default function Landing() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {jobResults.downloads.previa_1 && (
+                    {jobResults.downloads?.previa_1 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - PREVIA 01 (IA)</span>
@@ -1197,7 +1295,7 @@ export default function Landing() {
                       </div>
                     )}
 
-                    {jobResults.downloads.previa_2 && (
+                    {jobResults.downloads?.previa_2 && (
                       <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
                         <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
                           <span>{phone} - PREVIA 02 (IA)</span>
@@ -1285,6 +1383,89 @@ export default function Landing() {
           </div>
         )}
       </main>
+
+      {/* MODAL DE DIAGNÓSTICO DE CHAVES */}
+      {showDiagnostics && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <Card className="bg-slate-900 border-slate-700 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg text-white flex items-center gap-2">
+                  <KeyRound className="w-5 h-5 text-indigo-400" />
+                  Status das Integrações (Secrets)
+                </CardTitle>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDiagnostics(false)}
+                  className="text-slate-400 hover:text-white h-7 w-7 p-0"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <CardDescription className="text-slate-400 text-xs">
+                Verifica se as variáveis de ambiente necessárias estão cadastradas no Base44.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {diagnosticsLoading ? (
+                <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                  <span className="text-xs">Consultando secrets no Base44...</span>
+                </div>
+              ) : diagnosticsData?.report ? (
+                <div className="space-y-2.5 text-xs font-mono">
+                  {Object.entries({
+                    "SUNO_API_KEY (Suno AI)": diagnosticsData.report.suno?.configured,
+                    "MUSIC_AI_API_KEY (Music.ai)": diagnosticsData.report.musicAi?.configured,
+                    "GOOGLE_SERVICE_ACCOUNT_JSON (Drive)": diagnosticsData.report.googleDrive?.configured,
+                    "ASAAS_API_KEY (Asaas PIX)": diagnosticsData.report.asaas?.configured,
+                    "UMBLER_TALK_API_TOKEN (WhatsApp)": diagnosticsData.report.umbler?.configured,
+                    "OPENROUTER_API_KEY (Opcional)": diagnosticsData.report.openRouter?.configured,
+                  }).map(([label, ok]) => (
+                    <div
+                      key={label}
+                      className={`flex items-center justify-between p-2.5 rounded-lg border ${
+                        ok
+                          ? "bg-emerald-950/30 border-emerald-500/30 text-emerald-300"
+                          : "bg-red-950/30 border-red-800/40 text-red-300"
+                      }`}
+                    >
+                      <span>{label}</span>
+                      <Badge variant="outline" className={ok ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}>
+                        {ok ? "Configurado" : "Ausente"}
+                      </Badge>
+                    </div>
+                  ))}
+
+                  {diagnosticsData.missing?.length > 0 && (
+                    <div className="mt-4 p-3 bg-amber-950/40 border border-amber-600/30 rounded-lg text-amber-200 text-xs font-sans space-y-1">
+                      <p className="font-bold">Atenção:</p>
+                      <p>
+                        Para configurar as chaves ausentes, acesse o painel do Base44 no menu <strong>Settings &gt; Environment Variables / Secrets</strong> e cadastre os nomes acima com seus respectivos valores.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-xs text-red-400 p-3 bg-red-950/40 rounded border border-red-800">
+                  {diagnosticsData?.error || "Não foi possível obter dados do diagnóstico."}
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="flex justify-end pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDiagnostics(false)}
+                className="text-xs border-slate-700 text-slate-300"
+              >
+                Fechar
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
 
       {/* MODAL DO FLUXO 9: CONFIRMAÇÃO DE ENVIO DE PRÉVIA */}
       {showPreviewModal && (
