@@ -15,12 +15,6 @@ import {
 import { transcribeAudioUrl } from '../../shared/transcription.ts';
 import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organizeLyrics.ts';
 import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
-import {
-  getGoogleDriveAccessToken,
-  ensureFolderHierarchy,
-  createNextSequentialMusicSubfolder,
-  uploadFileToDriveFolder,
-} from '../../shared/googleDrive.ts';
 import { extractPhone } from '../../shared/umblerTalk.ts';
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
@@ -30,7 +24,6 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   return buf instanceof ArrayBuffer ? buf : new Uint8Array(buf).buffer;
 }
 
-// O Base44 exige o Deno.serve() como ponto de entrada da função
 Deno.serve(async (req: Request) => {
   let jobId: string | null = null;
   let base44: any = null;
@@ -50,28 +43,20 @@ Deno.serve(async (req: Request) => {
     jobId = body.job_id;
 
     if (!client_audio_uri) {
-      return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório (client_audio_uri ausente)." });
+      return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório." });
     }
 
     const hasPreGenerated = Boolean(pre_generated_v1_uri && pre_generated_v2_uri);
 
     const musicAiKey = secrets.get("MUSIC_AI_API_KEY") || process.env["MUSIC_AI_API_KEY"];
     if (!musicAiKey || !musicAiKey.trim()) {
-      return Response.json({
-        success: false,
-        error: "Chave MUSIC_AI_API_KEY não configurada nos Secrets do Base44.",
-        missing_secret: "MUSIC_AI_API_KEY",
-      });
+      return Response.json({ success: false, error: "Chave MUSIC_AI_API_KEY ausente." });
     }
 
     if (!hasPreGenerated) {
       const sunoKey = secrets.get("SUNO_API_KEY");
       if (!sunoKey || !sunoKey.trim()) {
-        return Response.json({
-          success: false,
-          error: "Chave SUNO_API_KEY não configurada nos Secrets do Base44.",
-          missing_secret: "SUNO_API_KEY",
-        });
+        return Response.json({ success: false, error: "Chave SUNO_API_KEY ausente." });
       }
     }
 
@@ -105,18 +90,12 @@ Deno.serve(async (req: Request) => {
     let v2AudioUrl = "";
 
     if (hasPreGenerated) {
-      currentStep = "Carregando versões de IA fornecidas";
-      await updateStatus("using_pregenerated", { message: "Utilizando versões de IA fornecidas..." });
+      currentStep = "Carregando versões fornecidas";
+      await updateStatus("using_pregenerated");
 
       const [{ signed_url: v1SignedUrl }, { signed_url: v2SignedUrl }] = await Promise.all([
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
-          file_uri: pre_generated_v1_uri,
-          expires_in: 3600,
-        }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
-          file_uri: pre_generated_v2_uri,
-          expires_in: 3600,
-        }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_uri, expires_in: 3600 }),
       ]);
 
       v1AudioUrl = v1SignedUrl;
@@ -135,7 +114,7 @@ Deno.serve(async (req: Request) => {
       }
 
       currentStep = "Separação de stems com Music.ai";
-      await updateStatus("separating_stems", { message: "Separando vocais e instrumentais..." });
+      await updateStatus("separating_stems");
       [stems1, stems2] = await Promise.all([
         separateAudioWithMusicAi(sunoV1Buffer, "V1 Stems"),
         separateAudioWithMusicAi(sunoV2Buffer, "V2 Stems"),
@@ -148,25 +127,16 @@ Deno.serve(async (req: Request) => {
       musicPrompt = await generateMusicalPrompt(base44, style_choice);
 
       currentStep = "Geração de 2 versões no Suno";
-      await updateStatus("generating_suno", {
-        lyrics: organizedLyrics,
-        style_prompt: musicPrompt,
-      });
+      await updateStatus("generating_suno");
 
-      sunoTaskId = await createSunoGenerationTask({
-        lyrics: organizedLyrics,
-        stylePrompt: musicPrompt,
-      });
-
+      sunoTaskId = await createSunoGenerationTask({ lyrics: organizedLyrics, stylePrompt: musicPrompt });
       const sunoResult = await pollSunoGeneration(sunoTaskId);
       const { version1, version2 } = sunoResult;
       v1AudioUrl = version1.audioUrl;
       v2AudioUrl = version2.audioUrl;
 
       currentStep = "Separação de stems no Suno";
-      await updateStatus("separating_stems", {
-        suno_task_id: sunoTaskId,
-      });
+      await updateStatus("separating_stems");
 
       const [stemTask1Id, stemTask2Id] = await Promise.all([
         createSunoStemTask(sunoTaskId, version1.audioId),
@@ -225,16 +195,11 @@ Deno.serve(async (req: Request) => {
     };
 
     const [
-      finalVoz1Upload,
-      finalVoz2Upload,
-      previaVoz1Upload,
-      previaVoz2Upload,
-      previaOrig1Upload,
-      previaOrig2Upload,
-      finalOrig1Upload,
-      finalOrig2Upload,
-      playback1Upload,
-      playback2Upload,
+      finalVoz1Upload, finalVoz2Upload,
+      previaVoz1Upload, previaVoz2Upload,
+      previaOrig1Upload, previaOrig2Upload,
+      finalOrig1Upload, finalOrig2Upload,
+      playback1Upload, playback2Upload,
     ] = await Promise.all([
       uploadPrivate(mix1.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, "audio/wav"),
       uploadPrivate(mix2.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, "audio/wav"),
@@ -248,46 +213,8 @@ Deno.serve(async (req: Request) => {
       uploadPrivate(v2InstBuffer, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
     ]);
 
-    currentStep = "Organização no Google Drive";
-    await updateStatus("uploading_drive");
-
-    const serviceAccountJson = secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON") || secrets.get("GOOGLE_DRIVE_SERVICE_KEY");
-    let driveCustomerFolderId: string | null = null;
-    let driveSubfolderName: string | null = null;
-
-    if (serviceAccountJson) {
-      try {
-        const drivePromise = (async () => {
-          const driveToken = await getGoogleDriveAccessToken(serviceAccountJson);
-          const customerFolder = await ensureFolderHierarchy(driveToken, [
-            "MM Music",
-            "2026",
-            "Clientes",
-            customerPhoneStr,
-          ]);
-          driveCustomerFolderId = customerFolder.id;
-
-          const musicSubfolder = await createNextSequentialMusicSubfolder(driveToken, customerFolder.id);
-          driveSubfolderName = musicSubfolder.name;
-
-          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 01.mp3`, sunoV1Buffer, "audio/mpeg");
-          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 02.mp3`, sunoV2Buffer, "audio/mpeg");
-          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, mix1.fullWavBytes, "audio/wav");
-          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, mix2.fullWavBytes, "audio/wav");
-        })();
-
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("Google Drive timeout (25s exceeded)")), 25000)
-        );
-
-        await Promise.race([drivePromise, timeoutPromise]);
-      } catch (driveErr: any) {
-        console.warn("[Google Drive Warning - Non-blocking]:", driveErr.message);
-      }
-    }
-
     const completedData = {
-      status: "completed",
+      status: "completed_awaiting_drive", // Novo status intermediário
       phone: customerPhoneStr,
       phone_digits: phoneDigits,
       lyrics: organizedLyrics,
@@ -305,47 +232,17 @@ Deno.serve(async (req: Request) => {
       preview_v2_uri: previaOrig2Upload.file_uri,
       preview_voz_v1_uri: previaVoz1Upload.file_uri,
       preview_voz_v2_uri: previaVoz2Upload.file_uri,
-      drive_folder_id: driveCustomerFolderId,
-      drive_subfolder_name: driveSubfolderName,
     };
 
     if (jobId) {
-      try {
-        await base44.asServiceRole.entities.ProcessingJob.update(jobId, completedData);
-      } catch {}
+      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, completedData); } catch {}
     }
 
-    return Response.json({
-      success: true,
-      job: completedData,
-      downloads: {
-        final_orig_1: finalOrig1Upload.signed_url,
-        final_orig_2: finalOrig2Upload.signed_url,
-        playback_1: playback1Upload.signed_url,
-        playback_2: playback2Upload.signed_url,
-        final_voz_1: finalVoz1Upload.signed_url,
-        final_voz_2: finalVoz2Upload.signed_url,
-        previa_1: previaOrig1Upload.signed_url,
-        previa_2: previaOrig2Upload.signed_url,
-        previa_voz_1: previaVoz1Upload.signed_url,
-        previa_voz_2: previaVoz2Upload.signed_url,
-      },
-    });
+    return Response.json({ success: true, job: completedData });
   } catch (err: any) {
-    console.error(`[runPipeline error at step '${currentStep}']:` , err);
     if (jobId && base44) {
-      try {
-        await base44.asServiceRole.entities.ProcessingJob.update(jobId, {
-          status: "failed",
-          error_message: `${currentStep}: ${err.message}`,
-        });
-      } catch {}
+      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, { status: "failed", error_message: `${currentStep}: ${err.message}` }); } catch {}
     }
-
-    return Response.json({
-      success: false,
-      error: `Erro na etapa [${currentStep}]: ${err.message || "Falha desconhecida"}`,
-      step: currentStep,
-    }, { status: 200 });
+    return Response.json({ success: false, error: `Erro [${currentStep}]: ${err.message}`, step: currentStep }, { status: 200 });
   }
 });
