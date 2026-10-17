@@ -54,8 +54,6 @@ export default function Landing() {
 
   const [flowStage, setFlowStage] = useState("initial");
   const [copyrightData, setCopyrightData] = useState(null);
-  const [pipelineStep, setPipelineStep] = useState(0);
-  const [totalSteps, setTotalSteps] = useState(4);
   const [pipelineMessage, setPipelineMessage] = useState("");
   const [jobResults, setJobResults] = useState(null);
   const [formError, setFormError] = useState("");
@@ -204,27 +202,9 @@ export default function Landing() {
   const executePipeline = async (clientUri) => {
     setFlowStage("processing");
     const isPreGen = arrangementMode === "pre_generated";
-    setTotalSteps(isPreGen ? 4 : 6);
-
     const styleToUse = customStyle.trim() || selectedStyle;
 
-    setPipelineStep(1);
-    setPipelineMessage("Iniciando esteira musical...");
-
-    const t1 = setTimeout(() => {
-      setPipelineStep(2);
-      setPipelineMessage(isPreGen ? "Carregando vocais e playbacks fornecidos..." : "Gerando prompt no Suno...");
-    }, 3000);
-
-    const t2 = setTimeout(() => {
-      setPipelineStep(3);
-      setPipelineMessage(isPreGen ? "Utilizando voz do cliente diretamente..." : "Limpando e masterizando a voz do cliente no Music.ai...");
-    }, 8000);
-
-    const t3 = setTimeout(() => {
-      setPipelineStep(4);
-      setPipelineMessage("Sincronizando e mixando a voz nas 2 versões (DSP)...");
-    }, 15000);
+    setPipelineMessage(isPreGen ? "Processando vocais e playbacks diretos..." : "Gerando arranjos e mixando áudios...");
 
     try {
       const payload = {
@@ -243,24 +223,14 @@ export default function Landing() {
 
       const res = await base44.functions.invoke("runPipeline", payload);
 
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-
       if (res.data?.success) {
         setJobResults(res.data);
-        setPipelineStep(isPreGen ? 4 : 6);
-        setPipelineMessage("Produção finalizada com sucesso!");
         setFlowStage("ready");
       } else {
         const errorMsg = res.data?.error || "Falha na produção do áudio";
         throw new Error(errorMsg);
       }
     } catch (err) {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-
       console.error("Erro no pipeline:", err);
       setDetailedError({
         message: err.message || "Erro de processamento",
@@ -649,24 +619,12 @@ export default function Landing() {
         )}
 
         {flowStage === "processing" && (
-          <div className="space-y-8 max-w-2xl mx-auto py-8 animate-in fade-in duration-300">
-            <div className="text-center space-y-3">
-              <div className="inline-flex p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                <Sparkles className="w-8 h-8 animate-bounce" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
-              <p className="text-sm text-slate-400">{pipelineMessage}</p>
+          <div className="space-y-8 max-w-2xl mx-auto py-12 animate-in fade-in duration-300 text-center">
+            <div className="inline-flex p-4 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-400 mb-2">
+              <Loader2 className="w-10 h-10 animate-spin" />
             </div>
-            <Card className="bg-slate-900 border-slate-800 p-6 space-y-4 shadow-2xl">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>Progresso Geral</span>
-                  <span>{Math.round((pipelineStep / totalSteps) * 100)}%</span>
-                </div>
-                <Progress value={(pipelineStep / totalSteps) * 100} className="h-2.5 bg-slate-950" />
-                <p className="text-xs text-indigo-400 font-medium text-center pt-2">{pipelineMessage}</p>
-              </div>
-            </Card>
+            <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
+            <p className="text-sm text-slate-400">{pipelineMessage}</p>
           </div>
         )}
 
@@ -691,9 +649,9 @@ export default function Landing() {
                 <Card className="bg-slate-900 border-indigo-500/40 shadow-xl">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base text-indigo-300 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz do Cliente (Sincronizada)
+                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz (Sincronizada)
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Voz limpa unida aos instrumentais</CardDescription>
+                    <CardDescription className="text-xs text-slate-400">Sua voz unida aos instrumentais</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {jobResults.downloads?.final_voz_1 && (
@@ -722,7 +680,7 @@ export default function Landing() {
                     <CardTitle className="text-base text-amber-300 flex items-center gap-2">
                       <Headphones className="w-4 h-4 text-amber-400" /> Playbacks Instrumentais
                     </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Instrumentais isolados para shows e apresentações</CardDescription>
+                    <CardDescription className="text-xs text-slate-400">Instrumentais isolados para shows</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {jobResults.downloads?.playback_1 && (
