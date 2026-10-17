@@ -25,17 +25,14 @@ const STYLE_OPTIONS = [
 export default function Landing() {
   const navigate = useNavigate();
 
-  // ── 1. Dados do Cliente ──
   const [phone, setPhone] = useState("");
   const [customerName, setCustomerName] = useState("");
 
-  // ── 2. Voz do Cliente (Passo 2 - antes do estilo) ──
   const [clientAudioFile, setClientAudioFile] = useState(null);
   const [clientAudioUrl, setClientAudioUrl] = useState(null);
   const [clientAudioUri, setClientAudioUri] = useState(null);
   const [uploadingClientAudio, setUploadingClientAudio] = useState(false);
 
-  // ── 3. Arranjos e Estilo Musical ──
   const [arrangementMode, setArrangementMode] = useState("generate_suno");
   const [selectedStyle, setSelectedStyle] = useState("Sertanejo");
   const [customStyle, setCustomStyle] = useState("");
@@ -52,7 +49,6 @@ export default function Landing() {
 
   const [uploadingPreGen, setUploadingPreGen] = useState(false);
 
-  // ── Estados de Fluxo & Pipeline ──
   const [flowStage, setFlowStage] = useState("initial");
   const [copyrightData, setCopyrightData] = useState(null);
   const [pipelineStep, setPipelineStep] = useState(0);
@@ -62,12 +58,10 @@ export default function Landing() {
   const [formError, setFormError] = useState("");
   const [detailedError, setDetailedError] = useState(null);
 
-  // Diagnóstico de Chaves
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsData, setDiagnosticsData] = useState(null);
 
-  // Modal / Diálogo de envio de prévia (Fluxo 9)
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [sendingPreview, setSendingPreview] = useState(false);
   const [previewSent, setPreviewSent] = useState(false);
@@ -253,22 +247,25 @@ export default function Landing() {
       setUploadingPreGen(false);
     }
 
-    setFlowStage("checking_copyright");
-    setCopyrightData(null);
+    // ── VERIFICAÇÃO DE DIREITOS AUTORAIS APENAS SE CRIAR COM IA ──
+    if (arrangementMode === "generate_suno") {
+      setFlowStage("checking_copyright");
+      setCopyrightData(null);
 
-    try {
-      const res = await base44.functions.invoke("checkCopyright", {
-        file_uri: activeClientUri,
-        phone,
-      });
+      try {
+        const res = await base44.functions.invoke("checkCopyright", {
+          file_uri: activeClientUri,
+          phone,
+        });
 
-      if (res.data?.copyright_detected) {
-        setFlowStage("copyright_blocked");
-        setCopyrightData(res.data.details || {});
-        return;
+        if (res.data?.copyright_detected) {
+          setFlowStage("copyright_blocked");
+          setCopyrightData(res.data.details || {});
+          return;
+        }
+      } catch (err) {
+        console.warn("Aviso na verificação de direitos autorais:", err);
       }
-    } catch (err) {
-      console.warn("Aviso na verificação de direitos autorais:", err);
     }
 
     executePipeline(activeClientUri, v1Uri, v2Uri);
@@ -283,11 +280,10 @@ export default function Landing() {
     setFlowStage("initial");
   };
 
-  // ── Execução do Pipeline Backend ATUALIZADO ──
   const executePipeline = async (clientUri, v1Uri, v2Uri) => {
     setFlowStage("processing");
     const isPreGen = arrangementMode === "pre_generated" && Boolean(v1Uri && v2Uri);
-    setTotalSteps(isPreGen ? 5 : 6); // Uma etapa a menos, pois o Google Drive agora roda em background
+    setTotalSteps(isPreGen ? 5 : 6);
 
     const styleToUse = generatedPrompt.trim() || customStyle.trim() || selectedStyle;
 
@@ -331,7 +327,6 @@ export default function Landing() {
         payload.pre_generated_v2_uri = v2Uri;
       }
 
-      // Chama apenas o processamento (sem aguardar o Drive)
       const res = await base44.functions.invoke("runPipeline", payload);
 
       clearTimeout(t1);
@@ -343,23 +338,7 @@ export default function Landing() {
         setJobResults(res.data);
         setPipelineStep(isPreGen ? 5 : 6);
         setPipelineMessage("Produção finalizada com sucesso!");
-        
-        // Vai para a tela de Downloads IMEDIATAMENTE
         setFlowStage("ready");
-
-        // Chama o envio para o Google Drive em BACKGROUND (silencioso)
-        if (res.data.downloads) {
-          base44.functions.invoke("saveToDrive", {
-            job_id: res.data.job?.id,
-            phone: phone,
-            urls: res.data.downloads
-          }).then(driveRes => {
-            console.log("Upload para o Drive concluído com sucesso:", driveRes.data);
-          }).catch(driveErr => {
-            console.error("Falha ao salvar no Drive (background):", driveErr);
-          });
-        }
-
       } else {
         const errorMsg = res.data?.error || "Falha na produção do áudio";
         throw new Error(errorMsg);
@@ -810,455 +789,3 @@ export default function Landing() {
                                 setPreGenV2Uri(null);
                               }}
                               className="text-xs text-red-400 h-7 p-0 hover:bg-transparent"
-                            >
-                              Remover / Trocar versão 2
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <div className="flex justify-center pt-2">
-              <Button
-                size="lg"
-                onClick={handleStartProduction}
-                disabled={uploadingClientAudio || uploadingPreGen}
-                className="w-full sm:w-auto min-w-[280px] bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold py-6 text-base shadow-xl shadow-indigo-600/20 gap-2 rounded-xl transition-all"
-              >
-                <Sparkles className="w-5 h-5" />
-                Iniciar Produção Musical
-                <ArrowRight className="w-5 h-5" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "error" && detailedError && (
-          <div className="space-y-6 max-w-2xl mx-auto py-8 animate-in zoom-in-95 duration-200">
-            <Alert variant="destructive" className="bg-red-950/70 border-red-800 text-red-200 p-6 space-y-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <AlertTitle className="text-lg font-bold text-red-300">Falha no Processamento</AlertTitle>
-                  <AlertDescription className="text-sm text-red-200/90 leading-relaxed font-mono bg-red-950/90 p-3.5 rounded-lg border border-red-800/80 break-words">
-                    {detailedError.message}
-                  </AlertDescription>
-                </div>
-              </div>
-              <div className="pt-2 text-xs text-red-300/80 space-y-1">
-                <p><strong>Dica:</strong> Verifique as variáveis de ambiente no Base44 se o erro for relacionado a chaves de API.</p>
-              </div>
-            </Alert>
-
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <Button variant="outline" onClick={runDiagnostics} className="border-slate-700 bg-slate-900 text-slate-200 hover:text-white gap-2">
-                <KeyRound className="w-4 h-4 text-indigo-400" /> Verificar Chaves / Diagnóstico
-              </Button>
-              <Button onClick={() => setFlowStage("initial")} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2">
-                <RotateCcw className="w-4 h-4" /> Voltar à Tela Inicial
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "checking_copyright" && (
-          <div className="py-16 text-center space-y-6 animate-in fade-in duration-300">
-            <div className="inline-flex p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 animate-pulse">
-              <Loader2 className="w-10 h-10 animate-spin" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-white">Verificando Direitos Autorais</h2>
-              <p className="text-slate-400 max-w-md mx-auto text-sm">Analisando o áudio via Music.ai (Audible Magic) para assegurar que a obra está liberada...</p>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "copyright_blocked" && (
-          <div className="space-y-6 max-w-2xl mx-auto animate-in zoom-in-95 duration-300">
-            <Alert variant="destructive" className="bg-red-950/50 border-red-800 text-red-200 p-6">
-              <ShieldAlert className="w-6 h-6 text-red-400" />
-              <AlertTitle className="text-lg font-bold text-red-300 ml-2">Direitos Autorais Detectados!</AlertTitle>
-              <AlertDescription className="text-sm text-red-300/90 ml-2 mt-2 space-y-3">
-                <p>O sistema identificou que este áudio pertence a uma obra comercial protegida por direitos autorais.</p>
-                {copyrightData && (
-                  <div className="bg-red-950/80 rounded-lg p-4 border border-red-800/80 text-xs space-y-1.5 font-mono text-slate-200">
-                    <div><strong>Obra:</strong> {copyrightData.title || "Identificada na base fonográfica"}</div>
-                    <div><strong>Artista:</strong> {copyrightData.artist || "Não especificado"}</div>
-                    {copyrightData.label && <div><strong>Gravadora:</strong> {copyrightData.label}</div>}
-                    {copyrightData.isrc && <div><strong>ISRC:</strong> {copyrightData.isrc}</div>}
-                  </div>
-                )}
-              </AlertDescription>
-            </Alert>
-            <div className="flex justify-center">
-              <Button size="lg" onClick={handleRetryAnotherSong} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 font-semibold shadow-lg shadow-indigo-600/30">
-                <RotateCcw className="w-4 h-4" /> Tentar outra música
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "processing" && (
-          <div className="space-y-8 max-w-2xl mx-auto py-8 animate-in fade-in duration-300">
-            <div className="text-center space-y-3">
-              <div className="inline-flex p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                <Sparkles className="w-8 h-8 animate-bounce" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
-              <p className="text-sm text-slate-400">Acompanhe o processo em tempo real através da nossa esteira de inteligência artificial:</p>
-            </div>
-
-            <Card className="bg-slate-900 border-slate-800 p-6 space-y-6 shadow-2xl">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>Progresso Geral</span>
-                  <span>{Math.round((pipelineStep / totalSteps) * 100)}%</span>
-                </div>
-                <Progress value={(pipelineStep / totalSteps) * 100} className="h-2.5 bg-slate-950" />
-                <p className="text-xs text-indigo-400 font-medium text-center pt-2">{pipelineMessage}</p>
-              </div>
-
-              {/* Lista de etapas dinâmica conforme o modo ATUALIZADA (Drive removido da visão) */}
-              <div className="space-y-3 text-xs">
-                {(arrangementMode === "pre_generated"
-                  ? [
-                      { num: 1, text: "Verificação de direitos autorais (Music.ai)" },
-                      { num: 2, text: "Músicas IA fornecidas pelo utilizador (Suno pulado)" },
-                      { num: 3, text: "Separação de stems das versões (Vocais e Playbacks)" },
-                      { num: 4, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
-                      { num: 5, text: "Sincronização e Mixagem Dupla DSP" },
-                    ]
-                  : [
-                      { num: 1, text: "Verificação de direitos autorais (Music.ai)" },
-                      { num: 2, text: "Transcrição da letra e geração do prompt musical" },
-                      { num: 3, text: "Geração Suno (2 versões completas mantidas)" },
-                      { num: 4, text: "Separação de stems (Vocais e Playbacks)" },
-                      { num: 5, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
-                      { num: 6, text: "Sincronização e Mixagem Dupla DSP" },
-                    ]
-                ).map((st) => (
-                  <div
-                    key={st.num}
-                    className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
-                      pipelineStep >= st.num
-                        ? "bg-indigo-950/30 border-indigo-500/30 text-indigo-200"
-                        : "bg-slate-950/40 border-slate-800/60 text-slate-500"
-                    }`}
-                  >
-                    {pipelineStep > st.num ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    ) : pipelineStep === st.num ? (
-                      <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
-                    ) : (
-                      <span className="w-4 h-4 rounded-full border border-slate-700 text-[10px] flex items-center justify-center shrink-0">
-                        {st.num}
-                      </span>
-                    )}
-                    <span>{st.text}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {flowStage === "ready" && jobResults && (
-          <div className="space-y-10 animate-in fade-in duration-500">
-            <div className="text-center space-y-2">
-              <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-2">
-                <CheckCircle2 className="w-8 h-8" />
-              </div>
-              <h2 className="text-3xl font-extrabold text-white">Sua Produção Está Pronta!</h2>
-              <p className="text-sm text-slate-400 max-w-xl mx-auto">
-                Todas as faixas foram geradas, separadas, mixadas e sincronizadas. O Google Drive está recebendo os arquivos em segurança.
-              </p>
-            </div>
-
-            <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-purple-950 border border-indigo-500/30 rounded-2xl p-6 text-center space-y-4 shadow-xl">
-              <h3 className="font-bold text-lg text-white">Disponibilizar Prévia e Cobrança no WhatsApp</h3>
-              <p className="text-xs text-slate-300 max-w-lg mx-auto">
-                Envie as 4 prévias em alta qualidade e a chave PIX direta para o WhatsApp do cliente através do bot de pré-pagamento.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                <Button size="lg" onClick={() => setShowPreviewModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold gap-2 shadow-lg shadow-emerald-600/20">
-                  <Share2 className="w-4 h-4" /> Enviar prévia
-                </Button>
-              </div>
-
-              {pixInfo?.pixCode && (
-                <div className="mt-6 pt-6 border-t border-slate-800 text-left bg-slate-950/70 p-4 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-sm text-emerald-400">PIX Copia e Cola Gerado (R$ 49,90):</span>
-                    <Button size="sm" variant="outline" onClick={handleCopyPix} className="text-xs gap-1 border-slate-700">
-                      <Copy className="w-3.5 h-3.5" /> {copiedPix ? "Copiado!" : "Copiar Chave"}
-                    </Button>
-                  </div>
-                  <div className="p-3 bg-slate-900 rounded border border-slate-800 text-xs font-mono break-all text-slate-300 select-all">
-                    {pixInfo.pixCode}
-                  </div>
-                  {pixInfo.pixQrBase64 && (
-                    <div className="flex justify-center pt-2">
-                      <img src={`data:image/png;base64,${pixInfo.pixQrBase64}`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-slate-700 p-2 bg-white" />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <FileMusic className="w-5 h-5 text-indigo-400" /> Central de Downloads da Produção
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="bg-slate-900 border-indigo-500/40 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-indigo-300 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz do Cliente (Sincronizada)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Voz limpa e masterizada unida aos instrumentais</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.final_voz_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL COM VOZ 01</span>
-                          <a href={jobResults.downloads.final_voz_1} download className="text-indigo-400 hover:underline">Baixar WAV</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.final_voz_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL COM VOZ 02</span>
-                          <a href={jobResults.downloads.final_voz_2} download className="text-indigo-400 hover:underline">Baixar WAV</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-purple-300 flex items-center gap-2">
-                      <Music className="w-4 h-4 text-purple-400" /> Versões Originais da IA (Cantadas)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Duas variações completas geradas ou enviadas</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.final_orig_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL 01</span>
-                          <a href={jobResults.downloads.final_orig_1} download className="text-purple-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.final_orig_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL 02</span>
-                          <a href={jobResults.downloads.final_orig_2} download className="text-purple-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-amber-300 flex items-center gap-2">
-                      <Headphones className="w-4 h-4 text-amber-400" /> Playbacks Instrumentais
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Faixas sem voz isoladas para apresentações e shows</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.playback_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PLAYBACK 01</span>
-                          <a href={jobResults.downloads.playback_1} download className="text-amber-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.playback_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PLAYBACK 02</span>
-                          <a href={jobResults.downloads.playback_2} download className="text-amber-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-cyan-300 flex items-center gap-2">
-                      <FileMusic className="w-4 h-4 text-cyan-400" /> Prévias de Demonstração (1:10)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Cortes otimizados para pré-escuta de WhatsApp e redes</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.previa_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PREVIA 01 (IA)</span>
-                          <a href={jobResults.downloads.previa_1} download className="text-cyan-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.previa_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PREVIA 02 (IA)</span>
-                          <a href={jobResults.downloads.previa_2} download className="text-cyan-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-
-            <Card className="bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-900 border-indigo-500/30 p-6 space-y-6 shadow-2xl">
-              <div className="text-center space-y-1">
-                <Badge variant="outline" className="border-amber-500/40 text-amber-400 bg-amber-500/10 mb-2">
-                  <Gift className="w-3.5 h-3.5 mr-1" /> Ofertas Especiais de Pós-Produção
-                </Badge>
-                <h3 className="text-xl font-extrabold text-white">Potencialize o Lançamento da Sua Música</h3>
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Agradecemos pela preferência! Escolha um dos nossos serviços adicionais para profissionalizar ainda mais a sua obra:
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center mb-3">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <h4 className="font-bold text-sm text-white">Registro da Música</h4>
-                    <p className="text-xs text-slate-400 mt-1">Certificado de proteção e registro autoral na blockchain e órgãos de propriedade intelectual.</p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                    <span className="font-bold text-sm text-emerald-400">R$ 49,90</span>
-                    <Button size="sm" variant="outline" className="text-xs border-indigo-500/40 text-indigo-300">Adicionar</Button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center mb-3">
-                      <Video className="w-5 h-5" />
-                    </div>
-                    <h4 className="font-bold text-sm text-white">Vídeo com Legenda Karaokê</h4>
-                    <p className="text-xs text-slate-400 mt-1">Clipe animado com sincronização de letra palavra por palavra, pronto para TikTok e Reels.</p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                    <span className="font-bold text-sm text-emerald-400">R$ 39,90</span>
-                    <Button size="sm" variant="outline" className="text-xs border-indigo-500/40 text-indigo-300">Adicionar</Button>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-3">
-                  <div>
-                    <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center mb-3">
-                      <FileMusic className="w-5 h-5" />
-                    </div>
-                    <h4 className="font-bold text-sm text-white">Partitura Cifrada</h4>
-                    <p className="text-xs text-slate-400 mt-1">Documento PDF com cifragem completa, melodia transcrita e acordes para violão ou teclado.</p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                    <span className="font-bold text-sm text-emerald-400">R$ 29,90</span>
-                    <Button size="sm" variant="outline" className="text-xs border-indigo-500/40 text-indigo-300">Adicionar</Button>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
-      </main>
-
-      {showDiagnostics && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="bg-slate-900 border-slate-700 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg text-white flex items-center gap-2">
-                  <KeyRound className="w-5 h-5 text-indigo-400" /> Status das Integrações (Secrets)
-                </CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setShowDiagnostics(false)} className="text-slate-400 hover:text-white h-7 w-7 p-0">
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-              <CardDescription className="text-slate-400 text-xs">Verifica as variáveis de ambiente no Base44.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {diagnosticsLoading ? (
-                <div className="py-8 flex flex-col items-center justify-center gap-2 text-slate-400">
-                  <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
-                  <span className="text-xs">Consultando secrets...</span>
-                </div>
-              ) : diagnosticsData?.report ? (
-                <div className="space-y-2.5 text-xs font-mono">
-                  {Object.entries({
-                    "SUNO_API_KEY": diagnosticsData.report.suno?.configured,
-                    "MUSIC_AI_API_KEY": diagnosticsData.report.musicAi?.configured,
-                    "GOOGLE_SERVICE_ACCOUNT_JSON": diagnosticsData.report.googleDrive?.configured,
-                  }).map(([label, ok]) => (
-                    <div key={label} className={`flex items-center justify-between p-2.5 rounded-lg border ${ok ? "bg-emerald-950/30 border-emerald-500/30 text-emerald-300" : "bg-red-950/30 border-red-800/40 text-red-300"}`}>
-                      <span>{label}</span>
-                      <Badge variant="outline" className={ok ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}>
-                        {ok ? "Configurado" : "Ausente"}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-red-400 p-3 bg-red-950/40 rounded border border-red-800">
-                  {diagnosticsData?.error || "Erro ao obter diagnóstico."}
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="flex justify-end pt-2">
-              <Button variant="outline" size="sm" onClick={() => setShowDiagnostics(false)} className="text-xs border-slate-700 text-slate-300">Fechar</Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
-
-      {showPreviewModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="bg-slate-900 border-slate-700 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
-            <CardHeader>
-              <CardTitle className="text-lg text-white">Confirmação de Envio</CardTitle>
-              <CardDescription className="text-slate-300 text-sm">Deseja enviar as prévias para o cliente?</CardDescription>
-            </CardHeader>
-            <CardContent className="text-xs text-slate-400 space-y-2">
-              <p>Serão enviadas as prévias cantadas (IA) e mixadas com a voz para o número <strong>{phone}</strong>, gerando a chave PIX automática.</p>
-            </CardContent>
-            <CardFooter className="flex justify-end gap-3 pt-2">
-              <Button variant="ghost" onClick={() => setShowPreviewModal(false)} disabled={sendingPreview} className="text-slate-400 hover:text-white">Não</Button>
-              <Button onClick={handleConfirmSendPreview} disabled={sendingPreview} className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold gap-2">
-                {sendingPreview && <Loader2 className="w-4 h-4 animate-spin" />} Sim, enviar
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
-    </div>
-  );
-}
