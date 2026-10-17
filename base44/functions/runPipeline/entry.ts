@@ -16,7 +16,6 @@ import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organ
 import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
 import { extractPhone } from '../../shared/umblerTalk.ts';
 
-// Validação estrita de WAV/RIFF para evitar travamentos
 function validateWavBuffer(arrayBuffer: ArrayBuffer, label: string): ArrayBuffer {
   const view = new DataView(arrayBuffer);
   if (arrayBuffer.byteLength > 12) {
@@ -26,12 +25,12 @@ function validateWavBuffer(arrayBuffer: ArrayBuffer, label: string): ArrayBuffer
       return arrayBuffer;
     }
   }
-  throw new Error(`O arquivo '${label}' não está no formato WAV válido com cabeçalho RIFF. Por favor, envie arquivos em formato WAV.`);
+  throw new Error(`O ficheiro '${label}' não está no formato WAV válido com cabeçalho RIFF. Por favor, envie ficheiros em formato WAV.`);
 }
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
-  if (!res.ok) throw new Error(`Falha ao baixar áudio (${res.status}): ${url}`);
+  const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+  if (!res.ok) throw new Error(`Falha ao descarregar áudio (${res.status}): ${url}`);
   const buf = await res.arrayBuffer();
   return buf instanceof ArrayBuffer ? buf : new Uint8Array(buf).buffer;
 }
@@ -57,7 +56,7 @@ Deno.serve(async (req: Request) => {
     jobId = body.job_id;
 
     if (!client_audio_uri) {
-      return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório." }, { status: 200 });
+      return Response.json({ success: false, error: "O ficheiro de áudio da voz é obrigatório." }, { status: 200 });
     }
 
     const hasDirectStems = Boolean(
@@ -68,89 +67,56 @@ Deno.serve(async (req: Request) => {
     const effectiveV2VocalUri = pre_generated_v2_vocal_uri || pre_generated_v1_vocal_uri;
     const effectiveV2InstUri = pre_generated_v2_instrumental_uri || pre_generated_v1_instrumental_uri;
 
-    const musicAiKey = secrets.get("MUSIC_AI_API_KEY") || process.env["MUSIC_AI_API_KEY"];
-    if (!hasDirectStems && (!musicAiKey || !musicAiKey.trim())) {
-      return Response.json({ success: false, error: "Chave MUSIC_AI_API_KEY ausente." }, { status: 200 });
-    }
-
-    if (!hasDirectStems) {
-      const sunoKey = secrets.get("SUNO_API_KEY");
-      if (!sunoKey || !sunoKey.trim()) {
-        return Response.json({ success: false, error: "Chave SUNO_API_KEY ausente." }, { status: 200 });
-      }
-    }
-
     const phoneInfo = extractPhone(rawPhone || "11988032049");
     const customerPhoneStr = phoneInfo?.formatted || rawPhone || "11 98803-2049";
     const phoneDigits = phoneInfo?.digits || "11988032049";
 
-    currentStep = "Preparação de URLs e Downloads em Paralelo";
-    const urlsToSign = [
-      { key: 'client', uri: client_audio_uri },
-      { key: 'v1Vocal', uri: pre_generated_v1_vocal_uri },
-      { key: 'v1Inst', uri: pre_generated_v1_instrumental_uri },
-      { key: 'v2Vocal', uri: effectiveV2VocalUri },
-      { key: 'v2Inst', uri: effectiveV2InstUri },
-    ];
-
-    const signedUrlsMap: Record<string, string> = {};
-    await Promise.all(
-      urlsToSign.map(async (item) => {
-        if (!item.uri) return;
-        const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
-          file_uri: item.uri,
-          expires_in: 3600,
-        });
-        signedUrlsMap[item.key] = signed_url;
-      })
-    );
-
-    const downloadPromises: Record<string, Promise<ArrayBuffer>> = {
-      client: fetchBuffer(signedUrlsMap['client']),
+    currentStep = "Obtenção de URLs assinados";
+    const getSignedUrl = async (uri: string) => {
+      const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+        file_uri: uri,
+        expires_in: 3600,
+      });
+      return signed_url;
     };
 
-    if (hasDirectStems) {
-      downloadPromises['v1Vocal'] = fetchBuffer(signedUrlsMap['v1Vocal']);
-      downloadPromises['v1Inst'] = fetchBuffer(signedUrlsMap['v1Inst']);
-      downloadPromises['v2Vocal'] = fetchBuffer(signedUrlsMap['v2Vocal']);
-      downloadPromises['v2Inst'] = fetchBuffer(signedUrlsMap['v2Inst']);
-    }
-
-    const downloadedKeys = Object.keys(downloadPromises);
-    const downloadedBuffers = await Promise.all(Object.values(downloadPromises));
-    const buffersMap: Record<string, ArrayBuffer> = {};
-    downloadedKeys.forEach((key, index) => {
-      buffersMap[key] = downloadedBuffers[index];
-    });
+    const clientSignedUrl = await getSignedUrl(client_audio_uri);
+    const clientAudioBuffer = await fetchBuffer(clientSignedUrl);
 
     let organizedLyrics = "Música Autoral - Letra em Produção";
     let musicPrompt = style_choice;
-    let stems1: { vocalUrl: string; instrumentalUrl: string };
-    let stems2: { vocalUrl: string; instrumentalUrl: string };
-    let sunoTaskId: string = hasDirectStems ? "direct_stems_by_user" : "";
+    let stems1 = { vocalUrl: "", instrumentalUrl: "" };
+    let stems2 = { vocalUrl: "", instrumentalUrl: "" };
+    let sunoTaskId = hasDirectStems ? "direct_stems_by_user" : "";
     let v1AudioUrl = "";
     let v2AudioUrl = "";
-    let sunoV1Buffer: ArrayBuffer = new ArrayBuffer(0);
-    let sunoV2Buffer: ArrayBuffer = new ArrayBuffer(0);
+    let sunoV1Buffer = new ArrayBuffer(0);
+    let sunoV2Buffer = new ArrayBuffer(0);
 
     if (hasDirectStems) {
-      currentStep = "Processando Stems Diretos";
-      stems1 = { vocalUrl: signedUrlsMap['v1Vocal'], instrumentalUrl: signedUrlsMap['v1Inst'] };
-      stems2 = { vocalUrl: signedUrlsMap['v2Vocal'], instrumentalUrl: signedUrlsMap['v2Inst'] };
-      v1AudioUrl = signedUrlsMap['v1Inst'];
-      v2AudioUrl = signedUrlsMap['v2Inst'];
-      sunoV1Buffer = buffersMap['v1Inst'];
-      sunoV2Buffer = buffersMap['v2Inst'];
+      currentStep = "Carregamento de Stems Diretos";
+      const v1VocalSigned = await getSignedUrl(pre_generated_v1_vocal_uri);
+      const v1InstSigned = await getSignedUrl(pre_generated_v1_instrumental_uri);
+      const v2VocalSigned = await getSignedUrl(effectiveV2VocalUri);
+      const v2InstSigned = await getSignedUrl(effectiveV2InstUri);
+
+      stems1 = { vocalUrl: v1VocalSigned, instrumentalUrl: v1InstSigned };
+      stems2 = { vocalUrl: v2VocalSigned, instrumentalUrl: v2InstSigned };
+      v1AudioUrl = v1InstSigned;
+      v2AudioUrl = v2InstSigned;
+
+      sunoV1Buffer = await fetchBuffer(v1InstSigned);
+      sunoV2Buffer = await fetchBuffer(v2InstSigned);
 
       try {
-        const rawTranscript = await transcribeAudioUrl(signedUrlsMap['client']);
+        const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
         organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
       } catch (err: any) {
         console.warn("[transcribe] aviso:", err.message);
       }
     } else {
       currentStep = "Geração no Suno";
-      const rawTranscript = await transcribeAudioUrl(signedUrlsMap['client']);
+      const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
       organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
       musicPrompt = await generateMusicalPrompt(base44, style_choice);
 
@@ -175,25 +141,11 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    let clientMasteredBuffer: ArrayBuffer;
-    if (hasDirectStems) {
-      currentStep = "Validando voz do cliente";
-      clientMasteredBuffer = validateWavBuffer(buffersMap['client'], "Voz do Cliente");
-    } else {
-      currentStep = "Limpeza e Masterização no Music.ai";
-      const { fileReference: clientFileRef } = await uploadToMusicAi(buffersMap['client'], "audio/mpeg");
-      const cleanVocalsUrl = await cleanupCustomerVocal(clientFileRef, `Cleanup ${customerPhoneStr}`);
-      const aiMasteredUrl = await masterCustomerVocal(cleanVocalsUrl, `Master ${customerPhoneStr}`);
-      clientMasteredBuffer = validateWavBuffer(await fetchBuffer(aiMasteredUrl), "Voz Masterizada");
-    }
+    currentStep = "Validação da voz do cliente";
+    const clientMasteredBuffer = validateWavBuffer(clientAudioBuffer, "Voz do Cliente");
 
     currentStep = "Sincronização e Mixagem DSP";
-    const [
-      v1VocalRaw,
-      v1InstRaw,
-      v2VocalRaw,
-      v2InstRaw,
-    ] = await Promise.all([
+    const [v1VocalRaw, v1InstRaw, v2VocalRaw, v2InstRaw] = await Promise.all([
       fetchBuffer(stems1.vocalUrl),
       fetchBuffer(stems1.instrumentalUrl),
       fetchBuffer(stems2.vocalUrl),
@@ -205,7 +157,6 @@ Deno.serve(async (req: Request) => {
     const v2VocalBuffer = validateWavBuffer(v2VocalRaw, "Vocal Versão 2");
     const v2InstBuffer = validateWavBuffer(v2InstRaw, "Playback Versão 2");
 
-    // A etapa de sincronização permanece exatamente intacta:
     const [mix1, mix2] = await Promise.all([
       alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer),
       alignAndMixTrackPair(v2VocalBuffer, clientMasteredBuffer, v2InstBuffer),
