@@ -154,9 +154,10 @@ export default function Landing() {
       return;
     }
 
+    // Apenas a Versão 01 é obrigatória agora. A Versão 02 é opcional.
     if (arrangementMode === "pre_generated") {
-      if (!v1VocalUri || !v1InstUri || !v2VocalUri || !v2InstUri) {
-        setFormError("Por favor, envie o Vocal e o Playback de ambas as versões.");
+      if (!v1VocalUri || !v1InstUri) {
+        setFormError("Por favor, envie pelo menos o Vocal e o Playback da Versão 01.");
         return;
       }
     }
@@ -204,7 +205,7 @@ export default function Landing() {
     const isPreGen = arrangementMode === "pre_generated";
     const styleToUse = customStyle.trim() || selectedStyle;
 
-    setPipelineMessage(isPreGen ? "Processando vocais e playbacks diretos..." : "Gerando arranjos e mixando áudios...");
+    setPipelineMessage(isPreGen ? "Processando vocais e playbacks..." : "Gerando arranjos e mixando áudios...");
 
     try {
       const payload = {
@@ -217,8 +218,8 @@ export default function Landing() {
       if (isPreGen) {
         payload.pre_generated_v1_vocal_uri = v1VocalUri;
         payload.pre_generated_v1_instrumental_uri = v1InstUri;
-        payload.pre_generated_v2_vocal_uri = v2VocalUri;
-        payload.pre_generated_v2_instrumental_uri = v2InstUri;
+        if (v2VocalUri) payload.pre_generated_v2_vocal_uri = v2VocalUri;
+        if (v2InstUri) payload.pre_generated_v2_instrumental_uri = v2InstUri;
       }
 
       console.log("Enviando payload para runPipeline:", payload);
@@ -229,7 +230,7 @@ export default function Landing() {
         setJobResults(res.data);
         setFlowStage("ready");
       } else {
-        const errorMsg = res.data?.error || "Falha na produção do áudio";
+        const errorMsg = res.data?.error || res.data?.message || "Falha na produção do áudio";
         throw new Error(errorMsg);
       }
     } catch (err) {
@@ -451,7 +452,7 @@ export default function Landing() {
                     <Layers className={`w-5 h-5 shrink-0 mt-0.5 ${arrangementMode === "pre_generated" ? "text-indigo-400" : "text-slate-500"}`} />
                     <div>
                       <div className="text-sm font-bold">Já possuo os Stems (Voz + Playback)</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Envie os vocais da IA e instrumentais diretamente.</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Envie os vocais da IA e instrumentais (Versão 2 opcional).</div>
                     </div>
                   </button>
                 </div>
@@ -506,13 +507,13 @@ export default function Landing() {
                     <Alert className="bg-indigo-950/40 border-indigo-500/30 text-indigo-200">
                       <Layers className="w-4 h-4 text-indigo-400" />
                       <AlertDescription className="text-xs leading-relaxed ml-2">
-                        <strong>Envio Direto:</strong> Envie o vocal da IA e o playback instrumental separadamente para cada uma das 2 versões.
+                        <strong>Envio Direto:</strong> A <strong>Versão 01</strong> é obrigatória. A <strong>Versão 02</strong> é opcional (se não enviar, duplicamos a Versão 01).
                       </AlertDescription>
                     </Alert>
 
-                    {/* Versão 01 */}
+                    {/* Versão 01 (Obrigatória) */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
-                      <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Stems Separados)</h4>
+                      <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Obrigatória)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <Label className="text-xs text-slate-300 font-medium">Voz da IA (Vocal) - Versão 01*</Label>
@@ -554,16 +555,16 @@ export default function Landing() {
                       </div>
                     </div>
 
-                    {/* Versão 02 */}
+                    {/* Versão 02 (Opcional) */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
-                      <h4 className="font-bold text-sm text-purple-300">Versão 02 (Stems Separados)</h4>
+                      <h4 className="font-bold text-sm text-purple-300">Versão 02 (Opcional)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <Label className="text-xs text-slate-300 font-medium">Voz da IA (Vocal) - Versão 02*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Voz da IA (Vocal) - Versão 02</Label>
                           {!v2VocalFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-purple-400 mb-1" />
-                              <span className="text-xs text-slate-300">Selecionar Vocal 2</span>
+                              <span className="text-xs text-slate-300">Selecionar Vocal 2 (Opcional)</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
                                 if (f) { setV2VocalFile(f); handleUploadFile(f, setV2VocalUri); }
@@ -578,11 +579,11 @@ export default function Landing() {
                         </div>
 
                         <div>
-                          <Label className="text-xs text-slate-300 font-medium">Playback (Instrumental) - Versão 02*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Playback (Instrumental) - Versão 02</Label>
                           {!v2InstFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-purple-400 mb-1" />
-                              <span className="text-xs text-slate-300">Selecionar Playback 2</span>
+                              <span className="text-xs text-slate-300">Selecionar Playback 2 (Opcional)</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
                                 if (f) { setV2InstFile(f); handleUploadFile(f, setV2InstUri); }
