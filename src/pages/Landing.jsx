@@ -38,7 +38,7 @@ export default function Landing() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
 
-  // Estados para os 4 arquivos (Versão 1 e 2: Voz + Playback)
+  // Estados para os 4 arquivos (Versão 1 e 2: Voz da IA + Playback)
   const [v1VocalFile, setV1VocalFile] = useState(null);
   const [v1VocalUri, setV1VocalUri] = useState(null);
 
@@ -126,31 +126,6 @@ export default function Landing() {
     }
   };
 
-  const handleGenerateMusicPrompt = async () => {
-    const inputStyle = customStyle.trim() || selectedStyle;
-    if (!inputStyle) return;
-
-    setGeneratingPrompt(true);
-    setFormError("");
-    setDetailedError(null);
-    try {
-      const res = await base44.functions.invoke("generateMusicPrompt", {
-        styleSelection: inputStyle,
-      });
-
-      if (res.data?.prompt) {
-        setGeneratedPrompt(res.data.prompt);
-      } else {
-        throw new Error(res.data?.error || "Resposta sem prompt");
-      }
-    } catch (err) {
-      console.error("Erro ao gerar prompt com IA:", err);
-      setGeneratedPrompt(`${inputStyle}, professional music production, acoustic and modern instruments, clear mix, emotional rhythm, radio ready`);
-    } finally {
-      setGeneratingPrompt(false);
-    }
-  };
-
   const runDiagnostics = async () => {
     setDiagnosticsLoading(true);
     setShowDiagnostics(true);
@@ -184,7 +159,7 @@ export default function Landing() {
 
     if (arrangementMode === "pre_generated") {
       if (!v1VocalUri || !v1InstUri || !v2VocalUri || !v2InstUri) {
-        setFormError("Por favor, envie os vocais e playbacks das duas versões.");
+        setFormError("Por favor, envie o Vocal e o Playback de ambas as versões.");
         return;
       }
     }
@@ -227,28 +202,19 @@ export default function Landing() {
     executePipeline(activeClientUri);
   };
 
-  const handleRetryAnotherSong = () => {
-    setClientAudioFile(null);
-    setClientAudioUrl(null);
-    setClientAudioUri(null);
-    setCopyrightData(null);
-    setDetailedError(null);
-    setFlowStage("initial");
-  };
-
   const executePipeline = async (clientUri) => {
     setFlowStage("processing");
     const isPreGen = arrangementMode === "pre_generated";
     setTotalSteps(isPreGen ? 4 : 6);
 
-    const styleToUse = generatedPrompt.trim() || customStyle.trim() || selectedStyle;
+    const styleToUse = customStyle.trim() || selectedStyle;
 
     setPipelineStep(1);
     setPipelineMessage("Iniciando esteira musical...");
 
     const t1 = setTimeout(() => {
       setPipelineStep(2);
-      setPipelineMessage(isPreGen ? "Carregando vocais e playbacks diretos..." : "Gerando prompt no Suno...");
+      setPipelineMessage(isPreGen ? "Carregando vocais e playbacks fornecidos..." : "Gerando prompt no Suno...");
     }, 3000);
 
     const t2 = setTimeout(() => {
@@ -517,7 +483,7 @@ export default function Landing() {
                     <Layers className={`w-5 h-5 shrink-0 mt-0.5 ${arrangementMode === "pre_generated" ? "text-indigo-400" : "text-slate-500"}`} />
                     <div>
                       <div className="text-sm font-bold">Já possuo os Stems (Voz + Playback)</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Envie os vocais e instrumentais diretamente.</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Envie os vocais da IA e instrumentais diretamente.</div>
                     </div>
                   </button>
                 </div>
@@ -572,16 +538,16 @@ export default function Landing() {
                     <Alert className="bg-indigo-950/40 border-indigo-500/30 text-indigo-200">
                       <Layers className="w-4 h-4 text-indigo-400" />
                       <AlertDescription className="text-xs leading-relaxed ml-2">
-                        <strong>Envio Direto:</strong> Envie o vocal da IA e o playback instrumental para cada uma das 2 versões.
+                        <strong>Envio Direto:</strong> Envie o vocal da IA e o playback instrumental separadamente para cada uma das 2 versões.
                       </AlertDescription>
                     </Alert>
 
-                    {/* Versão 01 */}
+                    {/* Versão 01: Vocal + Playback */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
-                      <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Stems)</h4>
+                      <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Stems Separados)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <Label className="text-xs text-slate-300">Voz da IA - Versão 01*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Voz da IA (Vocal) - Versão 01*</Label>
                           {!v1VocalFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-indigo-400 mb-1" />
@@ -592,11 +558,15 @@ export default function Landing() {
                               }} />
                             </label>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1">✓ {v1VocalFile.name}</div>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
+                              <span>✓ {v1VocalFile.name}</span>
+                              <button onClick={() => { setV1VocalFile(null); setV1VocalUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            </div>
                           )}
                         </div>
+
                         <div>
-                          <Label className="text-xs text-slate-300">Playback - Versão 01*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Playback (Instrumental) - Versão 01*</Label>
                           {!v1InstFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-indigo-400 mb-1" />
@@ -607,18 +577,21 @@ export default function Landing() {
                               }} />
                             </label>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1">✓ {v1InstFile.name}</div>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
+                              <span>✓ {v1InstFile.name}</span>
+                              <button onClick={() => { setV1InstFile(null); setV1InstUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            </div>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Versão 02 */}
+                    {/* Versão 02: Vocal + Playback */}
                     <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
-                      <h4 className="font-bold text-sm text-purple-300">Versão 02 (Stems)</h4>
+                      <h4 className="font-bold text-sm text-purple-300">Versão 02 (Stems Separados)</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                          <Label className="text-xs text-slate-300">Voz da IA - Versão 02*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Voz da IA (Vocal) - Versão 02*</Label>
                           {!v2VocalFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-purple-400 mb-1" />
@@ -629,11 +602,15 @@ export default function Landing() {
                               }} />
                             </label>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1">✓ {v2VocalFile.name}</div>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
+                              <span>✓ {v2VocalFile.name}</span>
+                              <button onClick={() => { setV2VocalFile(null); setV2VocalUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            </div>
                           )}
                         </div>
+
                         <div>
-                          <Label className="text-xs text-slate-300">Playback - Versão 02*</Label>
+                          <Label className="text-xs text-slate-300 font-medium">Playback (Instrumental) - Versão 02*</Label>
                           {!v2InstFile ? (
                             <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
                               <Upload className="w-5 h-5 text-purple-400 mb-1" />
@@ -644,7 +621,10 @@ export default function Landing() {
                               }} />
                             </label>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1">✓ {v2InstFile.name}</div>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
+                              <span>✓ {v2InstFile.name}</span>
+                              <button onClick={() => { setV2InstFile(null); setV2InstUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            </div>
                           )}
                         </div>
                       </div>
