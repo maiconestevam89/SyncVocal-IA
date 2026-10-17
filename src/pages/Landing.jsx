@@ -3,8 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Music, ArrowRight, Sparkles, Upload, Mic, ShieldAlert,
   RotateCcw, Headphones, CheckCircle2, FileMusic, Loader2,
-  Copy, Share2, Gift, Video, FileText, Trash2, Sliders,
-  Layers, Wand2, AlertTriangle, KeyRound, X
+  Trash2, Sliders, Layers, Wand2, AlertTriangle, KeyRound, X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,20 +38,25 @@ export default function Landing() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
 
-  const [preGenV1File, setPreGenV1File] = useState(null);
-  const [preGenV1Url, setPreGenV1Url] = useState(null);
-  const [preGenV1Uri, setPreGenV1Uri] = useState(null);
+  // Estados para os 4 arquivos (Versão 1 e 2: Voz + Playback)
+  const [v1VocalFile, setV1VocalFile] = useState(null);
+  const [v1VocalUri, setV1VocalUri] = useState(null);
 
-  const [preGenV2File, setPreGenV2File] = useState(null);
-  const [preGenV2Url, setPreGenV2Url] = useState(null);
-  const [preGenV2Uri, setPreGenV2Uri] = useState(null);
+  const [v1InstFile, setV1InstFile] = useState(null);
+  const [v1InstUri, setV1InstUri] = useState(null);
+
+  const [v2VocalFile, setV2VocalFile] = useState(null);
+  const [v2VocalUri, setV2VocalUri] = useState(null);
+
+  const [v2InstFile, setV2InstFile] = useState(null);
+  const [v2InstUri, setV2InstUri] = useState(null);
 
   const [uploadingPreGen, setUploadingPreGen] = useState(false);
 
   const [flowStage, setFlowStage] = useState("initial");
   const [copyrightData, setCopyrightData] = useState(null);
   const [pipelineStep, setPipelineStep] = useState(0);
-  const [totalSteps, setTotalSteps] = useState(6);
+  const [totalSteps, setTotalSteps] = useState(4);
   const [pipelineMessage, setPipelineMessage] = useState("");
   const [jobResults, setJobResults] = useState(null);
   const [formError, setFormError] = useState("");
@@ -61,12 +65,6 @@ export default function Landing() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [diagnosticsData, setDiagnosticsData] = useState(null);
-
-  const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const [sendingPreview, setSendingPreview] = useState(false);
-  const [previewSent, setPreviewSent] = useState(false);
-  const [pixInfo, setPixInfo] = useState(null);
-  const [copiedPix, setCopiedPix] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -114,6 +112,20 @@ export default function Landing() {
     setClientAudioUri(null);
   };
 
+  const handleUploadFile = async (file, setUriFn) => {
+    if (!file) return;
+    setUploadingPreGen(true);
+    try {
+      const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
+      setUriFn(file_uri);
+    } catch (err) {
+      console.error("Erro no upload:", err);
+      setFormError("Falha ao enviar arquivo.");
+    } finally {
+      setUploadingPreGen(false);
+    }
+  };
+
   const handleGenerateMusicPrompt = async () => {
     const inputStyle = customStyle.trim() || selectedStyle;
     if (!inputStyle) return;
@@ -136,38 +148,6 @@ export default function Landing() {
       setGeneratedPrompt(`${inputStyle}, professional music production, acoustic and modern instruments, clear mix, emotional rhythm, radio ready`);
     } finally {
       setGeneratingPrompt(false);
-    }
-  };
-
-  const handlePreGenV1Selected = async (file) => {
-    if (!file) return;
-    setPreGenV1File(file);
-    setPreGenV1Url(URL.createObjectURL(file));
-    setUploadingPreGen(true);
-    try {
-      const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
-      setPreGenV1Uri(file_uri);
-    } catch (err) {
-      console.error("Erro no upload da versão 1:", err);
-      setFormError("Erro ao enviar Música IA - Versão 1");
-    } finally {
-      setUploadingPreGen(false);
-    }
-  };
-
-  const handlePreGenV2Selected = async (file) => {
-    if (!file) return;
-    setPreGenV2File(file);
-    setPreGenV2Url(URL.createObjectURL(file));
-    setUploadingPreGen(true);
-    try {
-      const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
-      setPreGenV2Uri(file_uri);
-    } catch (err) {
-      console.error("Erro no upload da versão 2:", err);
-      setFormError("Erro ao enviar Música IA - Versão 2");
-    } finally {
-      setUploadingPreGen(false);
     }
   };
 
@@ -203,8 +183,8 @@ export default function Landing() {
     }
 
     if (arrangementMode === "pre_generated") {
-      if (!preGenV1File || !preGenV2File) {
-        setFormError("No modo de versões já geradas, é obrigatório anexar os 2 arquivos (Versão 1 e Versão 2).");
+      if (!v1VocalUri || !v1InstUri || !v2VocalUri || !v2InstUri) {
+        setFormError("Por favor, envie os vocais e playbacks das duas versões.");
         return;
       }
     }
@@ -222,29 +202,6 @@ export default function Landing() {
         return;
       }
       setUploadingClientAudio(false);
-    }
-
-    let v1Uri = preGenV1Uri;
-    let v2Uri = preGenV2Uri;
-    if (arrangementMode === "pre_generated") {
-      setUploadingPreGen(true);
-      try {
-        if (!v1Uri && preGenV1File) {
-          const res1 = await base44.integrations.Core.UploadPrivateFile({ file: preGenV1File });
-          v1Uri = res1.file_uri;
-          setPreGenV1Uri(v1Uri);
-        }
-        if (!v2Uri && preGenV2File) {
-          const res2 = await base44.integrations.Core.UploadPrivateFile({ file: preGenV2File });
-          v2Uri = res2.file_uri;
-          setPreGenV2Uri(v2Uri);
-        }
-      } catch (err) {
-        setFormError("Erro ao enviar versões pré-geradas para o servidor.");
-        setUploadingPreGen(false);
-        return;
-      }
-      setUploadingPreGen(false);
     }
 
     if (arrangementMode === "generate_suno") {
@@ -267,7 +224,7 @@ export default function Landing() {
       }
     }
 
-    executePipeline(activeClientUri, v1Uri, v2Uri);
+    executePipeline(activeClientUri);
   };
 
   const handleRetryAnotherSong = () => {
@@ -279,10 +236,10 @@ export default function Landing() {
     setFlowStage("initial");
   };
 
-  const executePipeline = async (clientUri, v1Uri, v2Uri) => {
+  const executePipeline = async (clientUri) => {
     setFlowStage("processing");
-    const isPreGen = arrangementMode === "pre_generated" && Boolean(v1Uri && v2Uri);
-    setTotalSteps(isPreGen ? 5 : 6);
+    const isPreGen = arrangementMode === "pre_generated";
+    setTotalSteps(isPreGen ? 4 : 6);
 
     const styleToUse = generatedPrompt.trim() || customStyle.trim() || selectedStyle;
 
@@ -291,27 +248,18 @@ export default function Landing() {
 
     const t1 = setTimeout(() => {
       setPipelineStep(2);
-      setPipelineMessage(
-        isPreGen
-          ? "Carregando versões de IA fornecidas (criação no Suno dispensada)..."
-          : "Transcrevendo áudio com Gemini e gerando prompt no Suno..."
-      );
+      setPipelineMessage(isPreGen ? "Carregando vocais e playbacks diretos..." : "Gerando prompt no Suno...");
     }, 3000);
 
     const t2 = setTimeout(() => {
       setPipelineStep(3);
-      setPipelineMessage("Separando vocais e instrumentais das 2 versões...");
+      setPipelineMessage("Limpando e masterizando a voz do cliente no Music.ai...");
     }, 12000);
 
     const t3 = setTimeout(() => {
       setPipelineStep(4);
-      setPipelineMessage("Limpando e masterizando a voz do cliente no Music.ai...");
-    }, 24000);
-
-    const t4 = setTimeout(() => {
-      setPipelineStep(5);
       setPipelineMessage("Sincronizando e mixando a voz masterizada nas 2 versões (DSP)...");
-    }, 38000);
+    }, 24000);
 
     try {
       const payload = {
@@ -322,8 +270,10 @@ export default function Landing() {
       };
 
       if (isPreGen) {
-        payload.pre_generated_v1_uri = v1Uri;
-        payload.pre_generated_v2_uri = v2Uri;
+        payload.pre_generated_v1_vocal_uri = v1VocalUri;
+        payload.pre_generated_v1_instrumental_uri = v1InstUri;
+        payload.pre_generated_v2_vocal_uri = v2VocalUri;
+        payload.pre_generated_v2_instrumental_uri = v2InstUri;
       }
 
       const res = await base44.functions.invoke("runPipeline", payload);
@@ -331,11 +281,10 @@ export default function Landing() {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
-      clearTimeout(t4);
 
       if (res.data?.success) {
         setJobResults(res.data);
-        setPipelineStep(isPreGen ? 5 : 6);
+        setPipelineStep(isPreGen ? 4 : 6);
         setPipelineMessage("Produção finalizada com sucesso!");
         setFlowStage("ready");
       } else {
@@ -346,17 +295,10 @@ export default function Landing() {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
-      clearTimeout(t4);
 
       console.error("Erro no pipeline:", err);
-      const serverError =
-        err.response?.data?.error ||
-        err.response?.data?.message ||
-        err.message ||
-        "Erro de processamento";
-
       setDetailedError({
-        message: serverError,
+        message: err.message || "Erro de processamento",
         step: pipelineMessage,
       });
       setFlowStage("error");
@@ -407,7 +349,7 @@ export default function Landing() {
                 </span>
               </h1>
               <p className="text-slate-400 text-sm md:text-base max-w-2xl mx-auto">
-                Cante ou anexe sua voz. O sistema masteriza seus vocais, cria ou utiliza suas músicas de inteligência artificial, sincroniza com perfeição e entrega os arquivos prontos para lançamento.
+                Cante ou anexe sua voz. O sistema masteriza seus vocais, sincroniza com os playbacks e entrega os arquivos prontos para lançamento.
               </p>
             </div>
 
@@ -543,7 +485,7 @@ export default function Landing() {
                   Arranjos e Estilo Musical
                 </CardTitle>
                 <CardDescription className="text-slate-400">
-                  Escolha se deseja que a IA gere os arranjos ou se já possui duas versões criadas.
+                  Escolha se deseja que a IA gere os arranjos ou se já possui os vocais e playbacks separados.
                 </CardDescription>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
@@ -559,7 +501,7 @@ export default function Landing() {
                     <Wand2 className={`w-5 h-5 shrink-0 mt-0.5 ${arrangementMode === "generate_suno" ? "text-indigo-400" : "text-slate-500"}`} />
                     <div>
                       <div className="text-sm font-bold">Criar Arranjos com IA (Suno)</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Defina o estilo e gere 2 versões inéditas automaticamente.</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Defina o estilo e gere 2 versões automaticamente.</div>
                     </div>
                   </button>
 
@@ -574,8 +516,8 @@ export default function Landing() {
                   >
                     <Layers className={`w-5 h-5 shrink-0 mt-0.5 ${arrangementMode === "pre_generated" ? "text-indigo-400" : "text-slate-500"}`} />
                     <div>
-                      <div className="text-sm font-bold">Já possuo 2 versões de IA</div>
-                      <div className="text-xs text-slate-400 mt-0.5">Anexe os 2 arquivos para pular a criação de arranjo.</div>
+                      <div className="text-sm font-bold">Já possuo os Stems (Voz + Playback)</div>
+                      <div className="text-xs text-slate-400 mt-0.5">Envie os vocais e instrumentais diretamente.</div>
                     </div>
                   </button>
                 </div>
@@ -585,449 +527,3 @@ export default function Landing() {
                 {arrangementMode === "generate_suno" && (
                   <div className="space-y-5 animate-in fade-in duration-200">
                     <div className="space-y-2">
-                      <Label className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Tags de Estilo Musical</Label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
-                        {STYLE_OPTIONS.map((style) => (
-                          <button
-                            key={style}
-                            type="button"
-                            onClick={() => {
-                              setSelectedStyle(style);
-                              if (!customStyle) setGeneratedPrompt("");
-                            }}
-                            className={`text-xs font-medium py-2 px-2.5 rounded-lg border transition-all text-center truncate ${
-                              selectedStyle === style
-                                ? "bg-indigo-600 border-indigo-400 text-white shadow-md shadow-indigo-600/30"
-                                : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
-                            }`}
-                          >
-                            {style}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 bg-slate-950/80 p-4 rounded-xl border border-slate-800">
-                      <div className="flex items-center justify-between">
-                        <Label htmlFor="customStyle" className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
-                          <Sliders className="w-4 h-4 text-indigo-400" />
-                          Estilo Personalizado (Opcional)
-                        </Label>
-                        <span className="text-[11px] text-slate-500">Ex: Sertanejo universitário animado</span>
-                      </div>
-                      <Input
-                        id="customStyle"
-                        placeholder="Digite o estilo ou detalhes do arranjo..."
-                        value={customStyle}
-                        onChange={(e) => setCustomStyle(e.target.value)}
-                        className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-600 focus:border-indigo-500"
-                      />
-
-                      <div className="flex items-center justify-between pt-2">
-                        <p className="text-xs text-slate-400">Gere um prompt técnico otimizado para o Suno.</p>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={handleGenerateMusicPrompt}
-                          disabled={generatingPrompt || (!customStyle.trim() && !selectedStyle)}
-                          className="bg-purple-600 hover:bg-purple-500 text-white text-xs gap-1.5 shadow-md shadow-purple-600/20"
-                        >
-                          {generatingPrompt ? (
-                            <><Loader2 className="w-3.5 h-3.5 animate-spin" />Otimizando...</>
-                          ) : (
-                            <><Sparkles className="w-3.5 h-3.5" />Gerar Prompt com IA</>
-                          )}
-                        </Button>
-                      </div>
-
-                      {generatedPrompt && (
-                        <div className="mt-3 p-3 bg-slate-900 rounded-lg border border-purple-500/30 space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-purple-300 flex items-center gap-1">
-                              <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Prompt Otimizado para o Suno:
-                            </span>
-                            <Badge variant="outline" className="text-[10px] border-purple-500/40 text-purple-300">Pronto</Badge>
-                          </div>
-                          <p className="text-xs font-mono text-slate-200 leading-relaxed bg-slate-950 p-2.5 rounded border border-slate-800">
-                            {generatedPrompt}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {arrangementMode === "pre_generated" && (
-                  <div className="space-y-4 animate-in fade-in duration-200">
-                    <Alert className="bg-indigo-950/40 border-indigo-500/30 text-indigo-200">
-                      <Layers className="w-4 h-4 text-indigo-400" />
-                      <AlertDescription className="text-xs leading-relaxed ml-2">
-                        <strong>Criação no Suno dispensada:</strong> Usaremos diretamente as duas versões enviadas abaixo para separação dos stems e mixagem final.
-                      </AlertDescription>
-                    </Alert>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
-                            <FileMusic className="w-4 h-4 text-indigo-400" /> Música IA - Versão 01*
-                          </Label>
-                          {preGenV1File && (
-                            <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 bg-emerald-500/10 text-[10px]">Anexada</Badge>
-                          )}
-                        </div>
-
-                        {!preGenV1File ? (
-                          <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-5 flex flex-col items-center justify-center text-center transition-colors">
-                            <Upload className="w-6 h-6 text-indigo-400 mb-2" />
-                            <span className="text-xs font-medium text-slate-300">Upload Versão 01</span>
-                            <input
-                              type="file"
-                              accept="audio/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) handlePreGenV1Selected(f);
-                              }}
-                            />
-                          </label>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-xs text-slate-300 font-mono truncate">{preGenV1File.name}</p>
-                            {preGenV1Url && <audio controls className="w-full h-8" src={preGenV1Url} />}
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setPreGenV1File(null);
-                                setPreGenV1Url(null);
-                                setPreGenV1Uri(null);
-                              }}
-                              className="text-xs text-red-400 h-7 p-0 hover:bg-transparent"
-                            >
-                              Remover / Trocar versão 1
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
-                            <FileMusic className="w-4 h-4 text-purple-400" /> Música IA - Versão 02*
-                          </Label>
-                          {preGenV2File && (
-                            <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 bg-emerald-500/10 text-[10px]">Anexada</Badge>
-                          )}
-                        </div>
-
-                        {!preGenV2File ? (
-                          <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-5 flex flex-col items-center justify-center text-center transition-colors">
-                            <Upload className="w-6 h-6 text-purple-400 mb-2" />
-                            <span className="text-xs font-medium text-slate-300">Upload Versão 02</span>
-                            <input
-                              type="file"
-                              accept="audio/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const f = e.target.files?.[0];
-                                if (f) handlePreGenV2Selected(f);
-                              }}
-                            />
-                          </label>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-xs text-slate-300 font-mono truncate">{preGenV2File.name}</p>
-                            {preGenV2Url && <audio controls className="w-full h-8" src={preGenV2Url} />}
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setPreGenV2File(null);
-                                setPreGenV2Url(null);
-                                setPreGenV2Uri(null);
-                              }}
-                              className="text-xs text-red-400 h-7 p-0 hover:bg-transparent"
-                            >
-                              Remover / Trocar versão 2
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <div className="flex justify-center pt-2">
-              <Button
-                size="lg"
-                onClick={handleStartProduction}
-                disabled={uploadingClientAudio || uploadingPreGen}
-                className="w-full sm:w-auto min-w-[280px] bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold py-6 text-base shadow-xl shadow-indigo-600/20 gap-2 rounded-xl transition-all"
-              >
-                <Sparkles className="w-5 h-5" />
-                Iniciar Produção Musical
-                <ArrowRight className="w-5 h-5" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "error" && detailedError && (
-          <div className="space-y-6 max-w-2xl mx-auto py-8 animate-in zoom-in-95 duration-200">
-            <Alert variant="destructive" className="bg-red-950/70 border-red-800 text-red-200 p-6 space-y-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <AlertTitle className="text-lg font-bold text-red-300">Falha no Processamento</AlertTitle>
-                  <AlertDescription className="text-sm text-red-200/90 leading-relaxed font-mono bg-red-950/90 p-3.5 rounded-lg border border-red-800/80 break-words">
-                    {detailedError.message}
-                  </AlertDescription>
-                </div>
-              </div>
-            </Alert>
-
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <Button onClick={() => setFlowStage("initial")} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2">
-                <RotateCcw className="w-4 h-4" /> Voltar à Tela Inicial
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "checking_copyright" && (
-          <div className="py-16 text-center space-y-6 animate-in fade-in duration-300">
-            <div className="inline-flex p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 animate-pulse">
-              <Loader2 className="w-10 h-10 animate-spin" />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-white">Verificando Direitos Autorais</h2>
-              <p className="text-slate-400 max-w-md mx-auto text-sm">Analisando o áudio via Music.ai...</p>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "copyright_blocked" && (
-          <div className="space-y-6 max-w-2xl mx-auto animate-in zoom-in-95 duration-300">
-            <Alert variant="destructive" className="bg-red-950/50 border-red-800 text-red-200 p-6">
-              <ShieldAlert className="w-6 h-6 text-red-400" />
-              <AlertTitle className="text-lg font-bold text-red-300 ml-2">Direitos Autorais Detectados!</AlertTitle>
-              <AlertDescription className="text-sm text-red-300/90 ml-2 mt-2 space-y-3">
-                <p>O sistema identificou que este áudio pertence a uma obra comercial protegida.</p>
-              </AlertDescription>
-            </Alert>
-            <div className="flex justify-center">
-              <Button size="lg" onClick={handleRetryAnotherSong} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 font-semibold shadow-lg shadow-indigo-600/30">
-                <RotateCcw className="w-4 h-4" /> Tentar outra música
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {flowStage === "processing" && (
-          <div className="space-y-8 max-w-2xl mx-auto py-8 animate-in fade-in duration-300">
-            <div className="text-center space-y-3">
-              <div className="inline-flex p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                <Sparkles className="w-8 h-8 animate-bounce" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
-              <p className="text-sm text-slate-400">Acompanhe o processo em tempo real através da nossa esteira de inteligência artificial:</p>
-            </div>
-
-            <Card className="bg-slate-900 border-slate-800 p-6 space-y-6 shadow-2xl">
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-slate-400">
-                  <span>Progresso Geral</span>
-                  <span>{Math.round((pipelineStep / totalSteps) * 100)}%</span>
-                </div>
-                <Progress value={(pipelineStep / totalSteps) * 100} className="h-2.5 bg-slate-950" />
-                <p className="text-xs text-indigo-400 font-medium text-center pt-2">{pipelineMessage}</p>
-              </div>
-
-              <div className="space-y-3 text-xs">
-                {(arrangementMode === "pre_generated"
-                  ? [
-                      { num: 1, text: "Músicas IA fornecidas pelo utilizador (Suno e verificação puladas)" },
-                      { num: 2, text: "Separação de stems das versões (Vocais e Playbacks)" },
-                      { num: 3, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
-                      { num: 4, text: "Sincronização e Mixagem Dupla DSP" },
-                    ]
-                  : [
-                      { num: 1, text: "Verificação de direitos autorais (Music.ai)" },
-                      { num: 2, text: "Transcrição da letra e geração do prompt musical" },
-                      { num: 3, text: "Geração Suno (2 versões completas mantidas)" },
-                      { num: 4, text: "Separação de stems (Vocais e Playbacks)" },
-                      { num: 5, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
-                      { num: 6, text: "Sincronização e Mixagem Dupla DSP" },
-                    ]
-                ).map((st) => (
-                  <div
-                    key={st.num}
-                    className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
-                      pipelineStep >= st.num
-                        ? "bg-indigo-950/30 border-indigo-500/30 text-indigo-200"
-                        : "bg-slate-950/40 border-slate-800/60 text-slate-500"
-                    }`}
-                  >
-                    {pipelineStep > st.num ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    ) : pipelineStep === st.num ? (
-                      <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
-                    ) : (
-                      <span className="w-4 h-4 rounded-full border border-slate-700 text-[10px] flex items-center justify-center shrink-0">
-                        {st.num}
-                      </span>
-                    )}
-                    <span>{st.text}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {flowStage === "ready" && jobResults && (
-          <div className="space-y-10 animate-in fade-in duration-500">
-            <div className="text-center space-y-2">
-              <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-2">
-                <CheckCircle2 className="w-8 h-8" />
-              </div>
-              <h2 className="text-3xl font-extrabold text-white">Sua Produção Está Pronta!</h2>
-              <p className="text-sm text-slate-400 max-w-xl mx-auto">
-                Todas as faixas foram geradas, separadas, mixadas e sincronizadas com sucesso. Baixe os seus arquivos abaixo!
-              </p>
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <FileMusic className="w-5 h-5 text-indigo-400" /> Central de Downloads da Produção
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="bg-slate-900 border-indigo-500/40 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-indigo-300 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz do Cliente (Sincronizada)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Voz limpa e masterizada unida aos instrumentais</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.final_voz_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL COM VOZ 01</span>
-                          <a href={jobResults.downloads.final_voz_1} download className="text-indigo-400 hover:underline">Baixar WAV</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.final_voz_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL COM VOZ 02</span>
-                          <a href={jobResults.downloads.final_voz_2} download className="text-indigo-400 hover:underline">Baixar WAV</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-purple-300 flex items-center gap-2">
-                      <Music className="w-4 h-4 text-purple-400" /> Versões Originais da IA (Cantadas)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Duas variações completas geradas ou enviadas</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.final_orig_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL 01</span>
-                          <a href={jobResults.downloads.final_orig_1} download className="text-purple-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.final_orig_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - FINAL 02</span>
-                          <a href={jobResults.downloads.final_orig_2} download className="text-purple-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-amber-300 flex items-center gap-2">
-                      <Headphones className="w-4 h-4 text-amber-400" /> Playbacks Instrumentais
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Faixas sem voz isoladas para shows</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.playback_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PLAYBACK 01</span>
-                          <a href={jobResults.downloads.playback_1} download className="text-amber-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.playback_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PLAYBACK 02</span>
-                          <a href={jobResults.downloads.playback_2} download className="text-amber-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-900 border-slate-800 shadow-xl">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base text-cyan-300 flex items-center gap-2">
-                      <FileMusic className="w-4 h-4 text-cyan-400" /> Prévias de Demonstração (1:10)
-                    </CardTitle>
-                    <CardDescription className="text-xs text-slate-400">Cortes otimizados para WhatsApp</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {jobResults.downloads?.previa_1 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PREVIA 01</span>
-                          <a href={jobResults.downloads.previa_1} download className="text-cyan-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_1} />
-                      </div>
-                    )}
-                    {jobResults.downloads?.previa_2 && (
-                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
-                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
-                          <span>{phone} - PREVIA 02</span>
-                          <a href={jobResults.downloads.previa_2} download className="text-cyan-400 hover:underline">Baixar MP3</a>
-                        </div>
-                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_2} />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
