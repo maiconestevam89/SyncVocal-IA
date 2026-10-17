@@ -527,3 +527,171 @@ export default function Landing() {
                 {arrangementMode === "generate_suno" && (
                   <div className="space-y-5 animate-in fade-in duration-200">
                     <div className="space-y-2">
+                      <Label className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Tags de Estilo Musical</Label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                        {STYLE_OPTIONS.map((style) => (
+                          <button
+                            key={style}
+                            type="button"
+                            onClick={() => {
+                              setSelectedStyle(style);
+                              if (!customStyle) setGeneratedPrompt("");
+                            }}
+                            className={`text-xs font-medium py-2 px-2.5 rounded-lg border transition-all text-center truncate ${
+                              selectedStyle === style
+                                ? "bg-indigo-600 border-indigo-400 text-white shadow-md shadow-indigo-600/30"
+                                : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                            }`}
+                          >
+                            {style}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 bg-slate-950/80 p-4 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="customStyle" className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
+                          <Sliders className="w-4 h-4 text-indigo-400" />
+                          Estilo Personalizado (Opcional)
+                        </Label>
+                      </div>
+                      <Input
+                        id="customStyle"
+                        placeholder="Digite o estilo ou detalhes do arranjo..."
+                        value={customStyle}
+                        onChange={(e) => setCustomStyle(e.target.value)}
+                        className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-600 focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {arrangementMode === "pre_generated" && (
+                  <div className="space-y-6 animate-in fade-in duration-200">
+                    <Alert className="bg-indigo-950/40 border-indigo-500/30 text-indigo-200">
+                      <Layers className="w-4 h-4 text-indigo-400" />
+                      <AlertDescription className="text-xs leading-relaxed ml-2">
+                        <strong>Envio Direto:</strong> Envie o vocal da IA e o playback instrumental para cada uma das 2 versões.
+                      </AlertDescription>
+                    </Alert>
+
+                    {/* Versão 01 */}
+                    <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
+                      <h4 className="font-bold text-sm text-indigo-300">Versão 01 (Stems)</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs text-slate-300">Voz da IA - Versão 01*</Label>
+                          {!v1VocalFile ? (
+                            <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
+                              <Upload className="w-5 h-5 text-indigo-400 mb-1" />
+                              <span className="text-xs text-slate-300">Selecionar Vocal 1</span>
+                              <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) { setV1VocalFile(f); handleUploadFile(f, setV1VocalUri); }
+                              }} />
+                            </label>
+                          ) : (
+                            <div className="text-xs text-emerald-400 mt-1">✓ {v1VocalFile.name}</div>
+                          )}
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-300">Playback - Versão 01*</Label>
+                          {!v1InstFile ? (
+                            <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
+                              <Upload className="w-5 h-5 text-indigo-400 mb-1" />
+                              <span className="text-xs text-slate-300">Selecionar Playback 1</span>
+                              <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) { setV1InstFile(f); handleUploadFile(f, setV1InstUri); }
+                              }} />
+                            </label>
+                          ) : (
+                            <div className="text-xs text-emerald-400 mt-1">✓ {v1InstFile.name}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Versão 02 */}
+                    <div className="space-y-3 bg-slate-950/90 border border-slate-800 rounded-xl p-4">
+                      <h4 className="font-bold text-sm text-purple-300">Versão 02 (Stems)</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-xs text-slate-300">Voz da IA - Versão 02*</Label>
+                          {!v2VocalFile ? (
+                            <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
+                              <Upload className="w-5 h-5 text-purple-400 mb-1" />
+                              <span className="text-xs text-slate-300">Selecionar Vocal 2</span>
+                              <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) { setV2VocalFile(f); handleUploadFile(f, setV2VocalUri); }
+                              }} />
+                            </label>
+                          ) : (
+                            <div className="text-xs text-emerald-400 mt-1">✓ {v2VocalFile.name}</div>
+                          )}
+                        </div>
+                        <div>
+                          <Label className="text-xs text-slate-300">Playback - Versão 02*</Label>
+                          {!v2InstFile ? (
+                            <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-3 mt-1 flex flex-col items-center justify-center text-center">
+                              <Upload className="w-5 h-5 text-purple-400 mb-1" />
+                              <span className="text-xs text-slate-300">Selecionar Playback 2</span>
+                              <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) { setV2InstFile(f); handleUploadFile(f, setV2InstUri); }
+                              }} />
+                            </label>
+                          ) : (
+                            <div className="text-xs text-emerald-400 mt-1">✓ {v2InstFile.name}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="flex justify-center pt-2">
+              <Button
+                size="lg"
+                onClick={handleStartProduction}
+                disabled={uploadingClientAudio || uploadingPreGen}
+                className="w-full sm:w-auto min-w-[280px] bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold py-6 text-base shadow-xl shadow-indigo-600/20 gap-2 rounded-xl transition-all"
+              >
+                <Sparkles className="w-5 h-5" />
+                Iniciar Produção Musical
+                <ArrowRight className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "processing" && (
+          <div className="space-y-8 max-w-2xl mx-auto py-8 animate-in fade-in duration-300">
+            <div className="text-center space-y-3">
+              <div className="inline-flex p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                <Sparkles className="w-8 h-8 animate-bounce" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
+              <p className="text-sm text-slate-400">{pipelineMessage}</p>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "ready" && jobResults && (
+          <div className="space-y-10 animate-in fade-in duration-500">
+            <div className="text-center space-y-2">
+              <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-2">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h2 className="text-3xl font-extrabold text-white">Sua Produção Está Pronta!</h2>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
