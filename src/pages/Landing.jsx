@@ -247,7 +247,6 @@ export default function Landing() {
       setUploadingPreGen(false);
     }
 
-    // ── VERIFICAÇÃO DE DIREITOS AUTORAIS APENAS SE CRIAR COM IA ──
     if (arrangementMode === "generate_suno") {
       setFlowStage("checking_copyright");
       setCopyrightData(null);
@@ -361,39 +360,6 @@ export default function Landing() {
         step: pipelineMessage,
       });
       setFlowStage("error");
-    }
-  };
-
-  const handleConfirmSendPreview = async () => {
-    setSendingPreview(true);
-    try {
-      const res = await base44.functions.invoke("sendUmblerPreview", {
-        job_id: jobResults?.job?.id,
-        phone,
-        customer_name: customerName,
-      });
-
-      if (res.data?.success) {
-        setPreviewSent(true);
-        setPixInfo({
-          pixCode: res.data.pix_code,
-          pixQrBase64: res.data.pix_qr_base64,
-          invoiceUrl: res.data.invoice_url,
-        });
-      }
-    } catch (err) {
-      alert("Erro ao disparar prévias: " + err.message);
-    } finally {
-      setSendingPreview(false);
-      setShowPreviewModal(false);
-    }
-  };
-
-  const handleCopyPix = () => {
-    if (pixInfo?.pixCode) {
-      navigator.clipboard.writeText(pixInfo.pixCode);
-      setCopiedPix(true);
-      setTimeout(() => setCopiedPix(false), 3000);
     }
   };
 
@@ -556,7 +522,7 @@ export default function Landing() {
                         variant="ghost"
                         size="sm"
                         onClick={handleRemoveClientAudio}
-                        className="text-red-400 hover:text-red-300 hover:bg-red-950/30 h-8 gap-1 text-xs"
+                        className="text-xs text-red-400 h-7 p-0 hover:bg-transparent"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         Trocar áudio
@@ -647,18 +613,18 @@ export default function Landing() {
                           <Sliders className="w-4 h-4 text-indigo-400" />
                           Estilo Personalizado (Opcional)
                         </Label>
-                        <span className="text-[11px] text-slate-500">Ex: Sertanejo universitário animado, sanfona marcante</span>
+                        <span className="text-[11px] text-slate-500">Ex: Sertanejo universitário animado</span>
                       </div>
                       <Input
                         id="customStyle"
-                        placeholder="Digite o estilo ou detalhes do arranjo que você deseja..."
+                        placeholder="Digite o estilo ou detalhes do arranjo..."
                         value={customStyle}
                         onChange={(e) => setCustomStyle(e.target.value)}
                         className="bg-slate-900 border-slate-700 text-white placeholder:text-slate-600 focus:border-indigo-500"
                       />
 
                       <div className="flex items-center justify-between pt-2">
-                        <p className="text-xs text-slate-400">Gere um prompt técnico otimizado para o Suno (sem BPM numérico).</p>
+                        <p className="text-xs text-slate-400">Gere um prompt técnico otimizado para o Suno.</p>
                         <Button
                           type="button"
                           size="sm"
@@ -667,7 +633,7 @@ export default function Landing() {
                           className="bg-purple-600 hover:bg-purple-500 text-white text-xs gap-1.5 shadow-md shadow-purple-600/20"
                         >
                           {generatingPrompt ? (
-                            <><Loader2 className="w-3.5 h-3.5 animate-spin" />Otimizando com IA...</>
+                            <><Loader2 className="w-3.5 h-3.5 animate-spin" />Otimizando...</>
                           ) : (
                             <><Sparkles className="w-3.5 h-3.5" />Gerar Prompt com IA</>
                           )}
@@ -675,13 +641,12 @@ export default function Landing() {
                       </div>
 
                       {generatedPrompt && (
-                        <div className="mt-3 p-3 bg-slate-900 rounded-lg border border-purple-500/30 space-y-1.5 animate-in fade-in duration-200">
+                        <div className="mt-3 p-3 bg-slate-900 rounded-lg border border-purple-500/30 space-y-1.5">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-purple-300 flex items-center gap-1">
-                              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                              Prompt Otimizado para o Suno:
+                              <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Prompt Otimizado para o Suno:
                             </span>
-                            <Badge variant="outline" className="text-[10px] border-purple-500/40 text-purple-300">Pronto para envio</Badge>
+                            <Badge variant="outline" className="text-[10px] border-purple-500/40 text-purple-300">Pronto</Badge>
                           </div>
                           <p className="text-xs font-mono text-slate-200 leading-relaxed bg-slate-950 p-2.5 rounded border border-slate-800">
                             {generatedPrompt}
@@ -697,7 +662,7 @@ export default function Landing() {
                     <Alert className="bg-indigo-950/40 border-indigo-500/30 text-indigo-200">
                       <Layers className="w-4 h-4 text-indigo-400" />
                       <AlertDescription className="text-xs leading-relaxed ml-2">
-                        <strong>Processo de criação no Suno dispensado:</strong> Usaremos diretamente as duas versões enviadas abaixo para separação dos stems, alinhamento rítmico DSP e mixagem final com a sua voz gravada.
+                        <strong>Criação no Suno dispensada:</strong> Usaremos diretamente as duas versões enviadas abaixo para separação dos stems e mixagem final.
                       </AlertDescription>
                     </Alert>
 
@@ -705,8 +670,7 @@ export default function Landing() {
                       <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <Label className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
-                            <FileMusic className="w-4 h-4 text-indigo-400" />
-                            Música IA - Versão 01*
+                            <FileMusic className="w-4 h-4 text-indigo-400" /> Música IA - Versão 01*
                           </Label>
                           {preGenV1File && (
                             <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 bg-emerald-500/10 text-[10px]">Anexada</Badge>
@@ -717,7 +681,6 @@ export default function Landing() {
                           <label className="cursor-pointer border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-5 flex flex-col items-center justify-center text-center transition-colors">
                             <Upload className="w-6 h-6 text-indigo-400 mb-2" />
                             <span className="text-xs font-medium text-slate-300">Upload Versão 01</span>
-                            <span className="text-[10px] text-slate-500 mt-0.5">MP3 ou WAV (máx 25MB)</span>
                             <input
                               type="file"
                               accept="audio/*"
@@ -752,8 +715,7 @@ export default function Landing() {
                       <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <Label className="text-slate-200 font-semibold text-sm flex items-center gap-1.5">
-                            <FileMusic className="w-4 h-4 text-purple-400" />
-                            Música IA - Versão 02*
+                            <FileMusic className="w-4 h-4 text-purple-400" /> Música IA - Versão 02*
                           </Label>
                           {preGenV2File && (
                             <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 bg-emerald-500/10 text-[10px]">Anexada</Badge>
@@ -764,7 +726,6 @@ export default function Landing() {
                           <label className="cursor-pointer border border-dashed border-slate-700 hover:border-purple-500 rounded-lg p-5 flex flex-col items-center justify-center text-center transition-colors">
                             <Upload className="w-6 h-6 text-purple-400 mb-2" />
                             <span className="text-xs font-medium text-slate-300">Upload Versão 02</span>
-                            <span className="text-[10px] text-slate-500 mt-0.5">MP3 ou WAV (máx 25MB)</span>
                             <input
                               type="file"
                               accept="audio/*"
@@ -789,3 +750,284 @@ export default function Landing() {
                                 setPreGenV2Uri(null);
                               }}
                               className="text-xs text-red-400 h-7 p-0 hover:bg-transparent"
+                            >
+                              Remover / Trocar versão 2
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="flex justify-center pt-2">
+              <Button
+                size="lg"
+                onClick={handleStartProduction}
+                disabled={uploadingClientAudio || uploadingPreGen}
+                className="w-full sm:w-auto min-w-[280px] bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold py-6 text-base shadow-xl shadow-indigo-600/20 gap-2 rounded-xl transition-all"
+              >
+                <Sparkles className="w-5 h-5" />
+                Iniciar Produção Musical
+                <ArrowRight className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "error" && detailedError && (
+          <div className="space-y-6 max-w-2xl mx-auto py-8 animate-in zoom-in-95 duration-200">
+            <Alert variant="destructive" className="bg-red-950/70 border-red-800 text-red-200 p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <AlertTitle className="text-lg font-bold text-red-300">Falha no Processamento</AlertTitle>
+                  <AlertDescription className="text-sm text-red-200/90 leading-relaxed font-mono bg-red-950/90 p-3.5 rounded-lg border border-red-800/80 break-words">
+                    {detailedError.message}
+                  </AlertDescription>
+                </div>
+              </div>
+            </Alert>
+
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <Button onClick={() => setFlowStage("initial")} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2">
+                <RotateCcw className="w-4 h-4" /> Voltar à Tela Inicial
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "checking_copyright" && (
+          <div className="py-16 text-center space-y-6 animate-in fade-in duration-300">
+            <div className="inline-flex p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 animate-pulse">
+              <Loader2 className="w-10 h-10 animate-spin" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold text-white">Verificando Direitos Autorais</h2>
+              <p className="text-slate-400 max-w-md mx-auto text-sm">Analisando o áudio via Music.ai...</p>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "copyright_blocked" && (
+          <div className="space-y-6 max-w-2xl mx-auto animate-in zoom-in-95 duration-300">
+            <Alert variant="destructive" className="bg-red-950/50 border-red-800 text-red-200 p-6">
+              <ShieldAlert className="w-6 h-6 text-red-400" />
+              <AlertTitle className="text-lg font-bold text-red-300 ml-2">Direitos Autorais Detectados!</AlertTitle>
+              <AlertDescription className="text-sm text-red-300/90 ml-2 mt-2 space-y-3">
+                <p>O sistema identificou que este áudio pertence a uma obra comercial protegida.</p>
+              </AlertDescription>
+            </Alert>
+            <div className="flex justify-center">
+              <Button size="lg" onClick={handleRetryAnotherSong} className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 font-semibold shadow-lg shadow-indigo-600/30">
+                <RotateCcw className="w-4 h-4" /> Tentar outra música
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {flowStage === "processing" && (
+          <div className="space-y-8 max-w-2xl mx-auto py-8 animate-in fade-in duration-300">
+            <div className="text-center space-y-3">
+              <div className="inline-flex p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                <Sparkles className="w-8 h-8 animate-bounce" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Produzindo Sua Música</h2>
+              <p className="text-sm text-slate-400">Acompanhe o processo em tempo real através da nossa esteira de inteligência artificial:</p>
+            </div>
+
+            <Card className="bg-slate-900 border-slate-800 p-6 space-y-6 shadow-2xl">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-slate-400">
+                  <span>Progresso Geral</span>
+                  <span>{Math.round((pipelineStep / totalSteps) * 100)}%</span>
+                </div>
+                <Progress value={(pipelineStep / totalSteps) * 100} className="h-2.5 bg-slate-950" />
+                <p className="text-xs text-indigo-400 font-medium text-center pt-2">{pipelineMessage}</p>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                {(arrangementMode === "pre_generated"
+                  ? [
+                      { num: 1, text: "Músicas IA fornecidas pelo utilizador (Suno e verificação puladas)" },
+                      { num: 2, text: "Separação de stems das versões (Vocais e Playbacks)" },
+                      { num: 3, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
+                      { num: 4, text: "Sincronização e Mixagem Dupla DSP" },
+                    ]
+                  : [
+                      { num: 1, text: "Verificação de direitos autorais (Music.ai)" },
+                      { num: 2, text: "Transcrição da letra e geração do prompt musical" },
+                      { num: 3, text: "Geração Suno (2 versões completas mantidas)" },
+                      { num: 4, text: "Separação de stems (Vocais e Playbacks)" },
+                      { num: 5, text: "Limpeza e Masterização da voz do cliente (Music.ai)" },
+                      { num: 6, text: "Sincronização e Mixagem Dupla DSP" },
+                    ]
+                ).map((st) => (
+                  <div
+                    key={st.num}
+                    className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                      pipelineStep >= st.num
+                        ? "bg-indigo-950/30 border-indigo-500/30 text-indigo-200"
+                        : "bg-slate-950/40 border-slate-800/60 text-slate-500"
+                    }`}
+                  >
+                    {pipelineStep > st.num ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : pipelineStep === st.num ? (
+                      <Loader2 className="w-4 h-4 text-indigo-400 animate-spin shrink-0" />
+                    ) : (
+                      <span className="w-4 h-4 rounded-full border border-slate-700 text-[10px] flex items-center justify-center shrink-0">
+                        {st.num}
+                      </span>
+                    )}
+                    <span>{st.text}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {flowStage === "ready" && jobResults && (
+          <div className="space-y-10 animate-in fade-in duration-500">
+            <div className="text-center space-y-2">
+              <div className="inline-flex p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-2">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h2 className="text-3xl font-extrabold text-white">Sua Produção Está Pronta!</h2>
+              <p className="text-sm text-slate-400 max-w-xl mx-auto">
+                Todas as faixas foram geradas, separadas, mixadas e sincronizadas com sucesso. Baixe os seus arquivos abaixo!
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <FileMusic className="w-5 h-5 text-indigo-400" /> Central de Downloads da Produção
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card className="bg-slate-900 border-indigo-500/40 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-indigo-300 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-400" /> Mixagem com a Voz do Cliente (Sincronizada)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Voz limpa e masterizada unida aos instrumentais</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.final_voz_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - FINAL COM VOZ 01</span>
+                          <a href={jobResults.downloads.final_voz_1} download className="text-indigo-400 hover:underline">Baixar WAV</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.final_voz_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - FINAL COM VOZ 02</span>
+                          <a href={jobResults.downloads.final_voz_2} download className="text-indigo-400 hover:underline">Baixar WAV</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_voz_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-slate-900 border-slate-800 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-purple-300 flex items-center gap-2">
+                      <Music className="w-4 h-4 text-purple-400" /> Versões Originais da IA (Cantadas)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Duas variações completas geradas ou enviadas</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.final_orig_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - FINAL 01</span>
+                          <a href={jobResults.downloads.final_orig_1} download className="text-purple-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.final_orig_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - FINAL 02</span>
+                          <a href={jobResults.downloads.final_orig_2} download className="text-purple-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.final_orig_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-slate-900 border-slate-800 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-amber-300 flex items-center gap-2">
+                      <Headphones className="w-4 h-4 text-amber-400" /> Playbacks Instrumentais
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Faixas sem voz isoladas para shows</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.playback_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - PLAYBACK 01</span>
+                          <a href={jobResults.downloads.playback_1} download className="text-amber-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.playback_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - PLAYBACK 02</span>
+                          <a href={jobResults.downloads.playback_2} download className="text-amber-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.playback_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-slate-900 border-slate-800 shadow-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-cyan-300 flex items-center gap-2">
+                      <FileMusic className="w-4 h-4 text-cyan-400" /> Prévias de Demonstração (1:10)
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400">Cortes otimizados para WhatsApp</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {jobResults.downloads?.previa_1 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - PREVIA 01</span>
+                          <a href={jobResults.downloads.previa_1} download className="text-cyan-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_1} />
+                      </div>
+                    )}
+                    {jobResults.downloads?.previa_2 && (
+                      <div className="space-y-1.5 p-3 rounded-lg bg-slate-950 border border-slate-800">
+                        <div className="flex justify-between items-center text-xs font-semibold text-slate-200">
+                          <span>{phone} - PREVIA 02</span>
+                          <a href={jobResults.downloads.previa_2} download className="text-cyan-400 hover:underline">Baixar MP3</a>
+                        </div>
+                        <audio controls className="w-full h-8" src={jobResults.downloads.previa_2} />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
