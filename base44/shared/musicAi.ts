@@ -222,3 +222,42 @@ export async function masterCustomerVocal(
 
   return masteredUrl as string;
 }
+
+/**
+ * Separação de hastes/stems de qualquer áudio usando Music.ai
+ */
+export async function separateAudioWithMusicAi(
+  fileBuffer: ArrayBuffer | Uint8Array,
+  jobName = "Stem Separation"
+): Promise<{ vocalUrl: string; instrumentalUrl: string }> {
+  const { fileReference } = await uploadToMusicAi(fileBuffer, "audio/mpeg");
+  const jobId = await createMusicAiJob(jobName, MUSIC_AI_WORKFLOWS.VOCAL_SEPARATION_CLEANUP, {
+    inputUrl: fileReference,
+  });
+
+  const finishedJob = await pollMusicAiJob(jobId);
+  const result = finishedJob?.result || {};
+
+  const vocalUrl =
+    result["clean_vocals"] ||
+    result["vocal"] ||
+    result["vocals"] ||
+    result["vocalUrl"] ||
+    result["output"];
+  const instrumentalUrl =
+    result["instrumental"] ||
+    result["playback"] ||
+    result["backing"] ||
+    result["instrumentalUrl"] ||
+    result["no_vocals"] ||
+    result["other"];
+
+  if (!vocalUrl) {
+    throw new Error("Music.ai não retornou a URL do vocal na separação de stems.");
+  }
+
+  return {
+    vocalUrl: vocalUrl as string,
+    instrumentalUrl: (instrumentalUrl || vocalUrl) as string,
+  };
+}
