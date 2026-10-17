@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
+import decode from 'npm:audio-decode';
 import {
   uploadToMusicAi,
   cleanupCustomerVocal,
@@ -15,6 +16,79 @@ import { transcribeAudioUrl } from '../../shared/transcription.ts';
 import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organizeLyrics.ts';
 import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
 import { extractPhone } from '../../shared/umblerTalk.ts';
+
+// Função para converter qualquer buffer (MP3 ou WAV) num WAV válido com header RIFF
+async function ensureWavBuffer(arrayBuffer: ArrayBuffer): Promise<ArrayBuffer> {
+  try {
+    const view = new DataView(arrayBuffer);
+    if (arrayBuffer.byteLength > 12) {
+      const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+      const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+      if (riff === 'RIFF' && wave === 'WAVE') {
+        return arrayBuffer; // Já é um WAV válido
+      }
+    }
+
+    // Se for MP3 ou outro formato, decodifica e codifica para WAV RIFF PCM
+    const audioBuffer = await decode(arrayBuffer);
+    return encodeWAV(audioBuffer);
+  } catch (e) {
+    console.warn("Aviso na conversão para WAV, tentando usar buffer original:", e);
+    return arrayBuffer;
+  }
+}
+
+function encodeWAV(audioBuffer: any): ArrayBuffer {
+  const numOfChan = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+
+  let result: Float32Array;
+  if (numOfChan === 2) {
+    const left = audioBuffer.getChannelData(0);
+    const right = audioBuffer.getChannelData(1);
+    result = new Float32Array(left.length + right.length);
+    for (let i = 0; i < left.length; i++) {
+      result[i * 2] = left[i];
+      result[i * 2 + 1] = right[i];
+    }
+  } else {
+    result = audioBuffer.getChannelData(0);
+  }
+
+  const samples = result;
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numOfChan, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
+  view.setUint16(32, numOfChan * (bitDepth / 8), true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return buffer;
+}
+
+function writeString(view: DataView, offset: number, string: string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
@@ -92,7 +166,6 @@ Deno.serve(async (req: Request) => {
       })
     );
 
-    // Baixar voz do cliente e stems em paralelo absoluto para poupar tempo de servidor
     const downloadPromises: Record<string, Promise<ArrayBuffer>> = {
       client: fetchBuffer(signedUrlsMap['client']),
     };
@@ -165,22 +238,22 @@ Deno.serve(async (req: Request) => {
 
     let clientMasteredBuffer: ArrayBuffer;
     if (hasDirectStems) {
-      currentStep = "Usando voz do cliente diretamente";
-      clientMasteredBuffer = buffersMap['client'];
+      currentStep = "Normalizando voz do cliente para WAV";
+      clientMasteredBuffer = await ensureWavBuffer(buffersMap['client']);
     } else {
       currentStep = "Limpeza e Masterização no Music.ai";
       const { fileReference: clientFileRef } = await uploadToMusicAi(buffersMap['client'], "audio/mpeg");
       const cleanVocalsUrl = await cleanupCustomerVocal(clientFileRef, `Cleanup ${customerPhoneStr}`);
       const aiMasteredUrl = await masterCustomerVocal(cleanVocalsUrl, `Master ${customerPhoneStr}`);
-      clientMasteredBuffer = await fetchBuffer(aiMasteredUrl);
+      clientMasteredBuffer = await ensureWavBuffer(await fetchBuffer(aiMasteredUrl));
     }
 
     currentStep = "Sincronização e Mixagem DSP";
     const [
-      v1VocalBuffer,
-      v1InstBuffer,
-      v2VocalBuffer,
-      v2InstBuffer,
+      v1VocalRaw,
+      v1InstRaw,
+      v2VocalRaw,
+      v2InstRaw,
     ] = await Promise.all([
       fetchBuffer(stems1.vocalUrl),
       fetchBuffer(stems1.instrumentalUrl),
@@ -188,6 +261,20 @@ Deno.serve(async (req: Request) => {
       fetchBuffer(stems2.instrumentalUrl),
     ]);
 
+    // Converte todos os stems de MP3 para WAV RIFF antes de entrar no DSP
+    const [
+      v1VocalBuffer,
+      v1InstBuffer,
+      v2VocalBuffer,
+      v2InstBuffer,
+    ] = await Promise.all([
+      ensureWavBuffer(v1VocalRaw),
+      ensureWavBuffer(v1InstRaw),
+      ensureWavBuffer(v2VocalRaw),
+      ensureWavBuffer(v2InstRaw),
+    ]);
+
+    // A etapa de sincronização permanece exatamente intacta conforme solicitado:
     const [mix1, mix2] = await Promise.all([
       alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer),
       alignAndMixTrackPair(v2VocalBuffer, clientMasteredBuffer, v2InstBuffer),
