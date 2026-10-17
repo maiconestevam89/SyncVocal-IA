@@ -154,7 +154,6 @@ export default function Landing() {
       return;
     }
 
-    // Apenas a Versão 01 é obrigatória agora. A Versão 02 é opcional.
     if (arrangementMode === "pre_generated") {
       if (!v1VocalUri || !v1InstUri) {
         setFormError("Por favor, envie pelo menos o Vocal e o Playback da Versão 01.");
@@ -222,9 +221,9 @@ export default function Landing() {
         if (v2InstUri) payload.pre_generated_v2_instrumental_uri = v2InstUri;
       }
 
-      console.log("Enviando payload para runPipeline:", payload);
+      console.log("Disparando runPipeline com payload:", payload);
       const res = await base44.functions.invoke("runPipeline", payload);
-      console.log("Resposta recebida do runPipeline:", res);
+      console.log("Resposta do servidor:", res);
 
       if (res.data?.success) {
         setJobResults(res.data);
