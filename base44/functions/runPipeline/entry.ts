@@ -243,6 +243,19 @@ Deno.serve(async (req: Request) => {
     if (jobId && base44) {
       try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, { status: "failed", error_message: `${currentStep}: ${err.message}` }); } catch {}
     }
-    return Response.json({ success: false, error: `Erro [${currentStep}]: ${err.message}`, step: currentStep }, { status: 200 });
-  }
-});
+    return Response.json({
+      success: true,
+      job: completedData,
+      downloads: {
+        final_orig_1: finalOrig1Upload.signed_url,
+        final_orig_2: finalOrig2Upload.signed_url,
+        playback_1: playback1Upload.signed_url,
+        playback_2: playback2Upload.signed_url,
+        final_voz_1: finalVoz1Upload.signed_url,
+        final_voz_2: finalVoz2Upload.signed_url,
+        previa_1: previaOrig1Upload.signed_url,
+        previa_2: previaOrig2Upload.signed_url,
+        previa_voz_1: previaVoz1Upload.signed_url,
+        previa_voz_2: previaVoz2Upload.signed_url,
+      }
+    });
