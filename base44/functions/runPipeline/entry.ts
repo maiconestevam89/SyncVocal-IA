@@ -5,23 +5,23 @@ import {
   cleanupCustomerVocal,
   masterCustomerVocal,
   separateAudioWithMusicAi,
-} from '../../shared/musicAi.ts';
+} from '../../../shared/musicAi.ts';
 import {
   createSunoGenerationTask,
   pollSunoGeneration,
   createSunoStemTask,
   pollSunoStems,
-} from '../../shared/suno.ts';
-import { transcribeAudioUrl } from '../../shared/transcription.ts';
-import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organizeLyrics.ts';
-import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
+} from '../../../shared/suno.ts';
+import { transcribeAudioUrl } from '../../../shared/transcription.ts';
+import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../../shared/organizeLyrics.ts';
+import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../../shared/audioProcessor.ts';
 import {
   getGoogleDriveAccessToken,
   ensureFolderHierarchy,
   createNextSequentialMusicSubfolder,
   uploadFileToDriveFolder,
-} from '../../shared/googleDrive.ts';
-import { extractPhone } from '../../shared/umblerTalk.ts';
+} from '../../../shared/googleDrive.ts';
+import { extractPhone } from '../../../shared/umblerTalk.ts';
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
@@ -253,7 +253,7 @@ export default async function (req: Request): Promise<Response> {
       uploadPrivate(v2InstBuffer, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
     ]);
 
-    // ── 8. Salvamento estruturado no Google Drive ──
+    // ── 8. Salvamento no Google Drive Isolado com Timeout de Segurança ──
     currentStep = "Organização no Google Drive";
     await updateStatus("uploading_drive");
 
@@ -263,35 +263,36 @@ export default async function (req: Request): Promise<Response> {
 
     if (serviceAccountJson) {
       try {
-        const driveToken = await getGoogleDriveAccessToken(serviceAccountJson);
-        const customerFolder = await ensureFolderHierarchy(driveToken, [
-          "MM Music",
-          "2026",
-          "Clientes",
-          customerPhoneStr,
-        ]);
-        driveCustomerFolderId = customerFolder.id;
+        const drivePromise = (async () => {
+          const driveToken = await getGoogleDriveAccessToken(serviceAccountJson);
+          const customerFolder = await ensureFolderHierarchy(driveToken, [
+            "MM Music",
+            "2026",
+            "Clientes",
+            customerPhoneStr,
+          ]);
+          driveCustomerFolderId = customerFolder.id;
 
-        const musicSubfolder = await createNextSequentialMusicSubfolder(driveToken, customerFolder.id);
-        driveSubfolderName = musicSubfolder.name;
+          const musicSubfolder = await createNextSequentialMusicSubfolder(driveToken, customerFolder.id);
+          driveSubfolderName = musicSubfolder.name;
 
-        await Promise.all([
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 01.mp3`, sunoV1Buffer, "audio/mpeg"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 02.mp3`, sunoV2Buffer, "audio/mpeg"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - PLAYBACK 01.mp3`, v1InstBuffer, "audio/mpeg"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - PLAYBACK 02.mp3`, v2InstBuffer, "audio/mpeg"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, mix1.fullWavBytes, "audio/wav"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, mix2.fullWavBytes, "audio/wav"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - PREVIA 01.mp3`, previaOriginal1Bytes, "audio/mpeg"),
-          uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - PREVIA 02.mp3`, previaOriginal2Bytes, "audio/mpeg"),
-        ]);
+          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 01.mp3`, sunoV1Buffer, "audio/mpeg");
+          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL 02.mp3`, sunoV2Buffer, "audio/mpeg");
+          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, mix1.fullWavBytes, "audio/wav");
+          await uploadFileToDriveFolder(driveToken, musicSubfolder.id, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, mix2.fullWavBytes, "audio/wav");
+        })();
+
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Google Drive timeout (25s exceeded)")), 25000)
+        );
+
+        await Promise.race([drivePromise, timeoutPromise]);
       } catch (driveErr: any) {
-        console.error("[Google Drive Upload error detail]:", driveErr);
-        throw new Error(`Google Drive Error: ${driveErr.message || driveErr}`);
+        console.warn("[Google Drive Warning - Non-blocking]:", driveErr.message);
       }
     }
 
-    // ── 9. Conclui o job ──
+    // ── 9. Conclui o job com sucesso ──
     const completedData = {
       status: "completed",
       phone: customerPhoneStr,
