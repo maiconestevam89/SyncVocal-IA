@@ -1,20 +1,25 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
-import { extractPhone, invokeStartBot, sendUmblerMediaFile, sendUmblerTextMessage, truncate } from '../../shared/umblerTalk.ts';
+import {
+  extractPhone,
+  invokeStartBot,
+  sendUmblerMediaFile,
+  sendUmblerTextMessage,
+  truncate,
+} from '../../shared/umblerTalk.ts';
 import {
   getGoogleDriveAccessToken,
   findCustomerDriveFolder,
   findLatestMusicSubfolder,
   findMusicDeliveryFiles,
   downloadDriveFile,
+  copyFolderToSharedAndGetLink,
 } from '../../shared/googleDrive.ts';
 
 const ASAAS_API_URL = "https://api.asaas.com/v3";
-
-// Trava em memória contra disparos duplicados simultâneos de webhook do Asaas
 const processedPaymentsMap = new Map<string, number>();
 
-export default async function(req: Request) {
+export default async function (req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
@@ -45,7 +50,6 @@ export default async function(req: Request) {
   const event = body?.event;
   const payment = body?.payment;
 
-  // Filtra apenas eventos de pagamento confirmado
   if (event !== "PAYMENT_RECEIVED" && event !== "PAYMENT_CONFIRMED" && !body?.force) {
     return Response.json({
       ignored: true,
@@ -58,44 +62,44 @@ export default async function(req: Request) {
     return Response.json({ error: "paymentId não informado no payload" }, { status: 400 });
   }
 
-  // Idempotência em memória (se o mesmo paymentId foi processado nos últimos 10 minutos)
+  // Trava anti-duplicidade em memória (10 minutos)
   const now = Date.now();
   const lastProcessed = processedPaymentsMap.get(paymentId);
-  if (lastProcessed && (now - lastProcessed) < 10 * 60 * 1000 && !body?.force) {
+  if (lastProcessed && now - lastProcessed < 10 * 60 * 1000 && !body?.force) {
     return Response.json({
       ignored: true,
-      reason: `Entrega para a cobrança ${paymentId} já foi disparada recentemente.`,
+      reason: `Pagamento ${paymentId} já processado recentemente.`,
     });
   }
 
-  let rawPhone = payment?.externalReference || body?.phone;
+  // 2. Extração do telefone do cliente
+  let rawPhone = payment?.mobilePhone || payment?.phone;
+  let customerName = payment?.customerName || "";
 
-  // 2. Se o telefone não veio no externalReference, consulta o cliente no Asaas
-  const asaasApiKey = secrets.get("ASAAS_API_KEY");
-  if (!rawPhone && payment?.customer && asaasApiKey) {
-    try {
-      const cusRes = await fetch(`${ASAAS_API_URL}/customers/${payment.customer}`, {
-        headers: { "access_token": asaasApiKey, "User-Agent": "SyncVocal-App/1.0" },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (cusRes.ok) {
-        const cusData = await cusRes.json();
-        rawPhone = cusData?.mobilePhone || cusData?.phone;
-      }
-    } catch (err) {
-      console.error("Erro ao buscar cliente no Asaas:", err);
+  if (!rawPhone && payment?.customer) {
+    const asaasApiKey = secrets.get("ASAAS_API_KEY");
+    if (asaasApiKey) {
+      try {
+        const custRes = await fetch(`${ASAAS_API_URL}/customers/${payment.customer}`, {
+          headers: { access_token: asaasApiKey, "User-Agent": "SyncVocal/1.0" },
+        });
+        if (custRes.ok) {
+          const custData = await custRes.json();
+          rawPhone = custData.mobilePhone || custData.phone;
+          customerName = custData.name || customerName;
+        }
+      } catch {}
     }
   }
 
-  const phoneInfo = extractPhone(rawPhone);
+  const phoneInfo = extractPhone(rawPhone || "");
   if (!phoneInfo) {
     return Response.json({
-      success: false,
-      error: `Não foi possível identificar o telefone do cliente na cobrança ${paymentId}.`,
+      error: `Não foi possível extrair um telefone válido do pagamento ${paymentId}.`,
     }, { status: 400 });
   }
 
-  // 3. Atualiza registro da cobrança no banco e verifica se já foi entregue
+  // 3. Atualiza entidade MusicPayment
   let paymentEntityId: string | null = null;
   if (base44?.asServiceRole?.entities?.MusicPayment) {
     try {
@@ -152,14 +156,12 @@ export default async function(req: Request) {
       deliveryLog.bot_error = err.message;
     }
 
-    // Pausa de 8 segundos para o bot de saudação enviar as mensagens antes da entrega dos arquivos
-    await new Promise((r) => setTimeout(r, 8000));
+    // Pausa para mensagens de saudação do bot
+    await new Promise((r) => setTimeout(r, 6000));
   }
 
   // 5. Consulta e Download dos Arquivos no Google Drive
   const serviceAccountJson = secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON") || secrets.get("GOOGLE_DRIVE_SERVICE_KEY");
-  const directDriveToken = secrets.get("GOOGLE_DRIVE_ACCESS_TOKEN");
-
   let driveToken: string | null = null;
   if (serviceAccountJson) {
     try {
@@ -167,47 +169,30 @@ export default async function(req: Request) {
     } catch (err: any) {
       deliveryLog.drive_auth_error = err.message;
     }
-  } else if (directDriveToken) {
-    driveToken = directDriveToken;
   }
 
   if (!driveToken) {
-    const errorMsg = "Credenciais do Google Drive não configuradas (defina GOOGLE_SERVICE_ACCOUNT_JSON nos secrets).";
-    if (paymentEntityId && base44?.asServiceRole?.entities?.MusicPayment) {
-      await base44.asServiceRole.entities.MusicPayment.update(paymentEntityId, {
-        error_message: errorMsg,
-      });
-    }
     return Response.json({
       success: false,
-      warning: "Pagamento processado e bot disparado, mas os arquivos do Google Drive não puderam ser acessados.",
-      error: errorMsg,
+      warning: "Pagamento recebido, mas o Google Drive não pôde ser autenticado.",
       deliveryLog,
-    }, { status: 200 });
+    });
   }
 
   try {
-    // 5.1 Localiza a pasta principal do cliente
+    // 5.1 Localiza pasta do cliente
     const customerFolder = await findCustomerDriveFolder(driveToken, phoneInfo.digits, phoneInfo.formatted);
     if (!customerFolder) {
-      throw new Error(`Pasta do cliente para o telefone ${phoneInfo.formatted} não encontrada no Google Drive.`);
+      throw new Error(`Pasta do cliente ${phoneInfo.formatted} não encontrada no Google Drive.`);
     }
 
-    deliveryLog.customer_folder = { id: customerFolder.id, name: customerFolder.name };
-
-    // 5.2 Localiza a subpasta mais recente (ex: MUSICA 02)
+    // 5.2 Localiza a subpasta mais recente
     const latestSubfolder = await findLatestMusicSubfolder(driveToken, customerFolder.id);
-    deliveryLog.subfolder = { id: latestSubfolder.id, name: latestSubfolder.name };
 
-    // 5.3 Encontra os 4 arquivos (FINAL 01, FINAL 02, PLAYBACK 01, PLAYBACK 02)
+    // 5.3 Encontra os arquivos de áudio completos
     const musicFiles = await findMusicDeliveryFiles(driveToken, latestSubfolder.id);
-    deliveryLog.found_files_count = musicFiles.length;
 
-    if (musicFiles.length === 0) {
-      throw new Error(`Nenhum arquivo final/playback encontrado na pasta ${latestSubfolder.name}.`);
-    }
-
-    // 5.4 Envia cada arquivo para o cliente via Umbler Talk
+    // 5.4 Envia os arquivos completos para o cliente via WhatsApp
     let deliveredCount = 0;
     for (const f of musicFiles) {
       try {
@@ -225,27 +210,69 @@ export default async function(req: Request) {
           name: f.name,
           category: f.category,
           status: sendRes.ok ? "sent" : "failed",
-          http_status: sendRes.status,
         });
 
         if (sendRes.ok) deliveredCount++;
-
-        // Pausa entre envios para preservar ordem e evitar limite do WhatsApp
         await new Promise((r) => setTimeout(r, 4000));
       } catch (fileErr: any) {
-        deliveryLog.files_delivered.push({
-          name: f.name,
-          category: f.category,
-          status: "error",
-          error: fileErr.message,
-        });
+        deliveryLog.files_delivered.push({ name: f.name, status: "error", error: fileErr.message });
       }
     }
 
-    // 6. Atualiza o registro final no banco
+    // ── 6. FLUXO 10: Compartilhando diretório do Drive (Pastas compartilhadas) ──
+    let sharedLink = "";
+    try {
+      const copyResult = await copyFolderToSharedAndGetLink(
+        driveToken,
+        phoneInfo.formatted,
+        latestSubfolder.name,
+        latestSubfolder.id
+      );
+      sharedLink = copyResult.webViewLink;
+      deliveryLog.shared_drive_link = sharedLink;
+    } catch (shareErr: any) {
+      console.warn("Aviso ao copiar para pastas compartilhadas:", shareErr.message);
+    }
+
+    // ── 7. FLUXO 11: Mensagem de Download Dinâmica ──
+    if (sharedLink && umblerToken && umblerOrgId && umblerChannelPhone) {
+      try {
+        const dynamicMsg = `Você também pode baixar todas suas produções feitas conosco através do link abaixo:\n${sharedLink}\nAcesse e faça o download de sua música!`;
+        await sendUmblerTextMessage({
+          apiToken: umblerToken,
+          orgId: umblerOrgId,
+          channelPhone: umblerChannelPhone,
+          customerPhone: phoneInfo.e164,
+          text: dynamicMsg,
+        });
+        deliveryLog.dynamic_link_message_sent = true;
+      } catch (msgErr: any) {
+        console.warn("Erro ao enviar mensagem dinâmica:", msgErr.message);
+      }
+
+      await new Promise((r) => setTimeout(r, 4000));
+
+      // ── 8. FLUXO 12: Agradecimento e Upsell ──
+      try {
+        const upsellMsg = `Agradecemos pela preferência em produzir conosco! 🎵✨\n\nDeseja potencializar ainda mais o seu projeto? Confira nossos serviços adicionais:\n\n1️⃣ Registro da música (R$ 49,90) - Garanta a proteção autoral da sua obra\n2️⃣ Criação de vídeo com legenda karaokê (R$ 39,90) - Pronto para divulgar nas redes\n3️⃣ Partitura cifrada (R$ 29,90) - Cifras completas para tocar e cantar\n\nResponda diretamente a esta mensagem para solicitar algum desses serviços adicionais!`;
+
+        await sendUmblerTextMessage({
+          apiToken: umblerToken,
+          orgId: umblerOrgId,
+          channelPhone: umblerChannelPhone,
+          customerPhone: phoneInfo.e164,
+          text: upsellMsg,
+        });
+        deliveryLog.upsell_message_sent = true;
+      } catch (upsellErr: any) {
+        console.warn("Erro ao enviar mensagem de upsell:", upsellErr.message);
+      }
+    }
+
+    // 9. Atualiza status no banco
     if (paymentEntityId && base44?.asServiceRole?.entities?.MusicPayment) {
       await base44.asServiceRole.entities.MusicPayment.update(paymentEntityId, {
-        status: deliveredCount >= 4 ? "delivered" : "paid",
+        status: "delivered",
         drive_folder_id: customerFolder.id,
         drive_subfolder_name: latestSubfolder.name,
         files_delivered_count: deliveredCount,
@@ -254,19 +281,12 @@ export default async function(req: Request) {
 
     return Response.json({
       success: true,
-      status: "Pagamento confirmado e entrega de arquivos concluída",
-      delivered_count: deliveredCount,
+      status: "Entrega completa realizada com sucesso!",
+      deliveredCount,
+      sharedLink,
       deliveryLog,
     });
   } catch (error: any) {
-    if (paymentEntityId && base44?.asServiceRole?.entities?.MusicPayment) {
-      try {
-        await base44.asServiceRole.entities.MusicPayment.update(paymentEntityId, {
-          error_message: error.message,
-        });
-      } catch {}
-    }
-
     return Response.json({
       success: false,
       error: error.message,

@@ -4,59 +4,139 @@
   "properties": {
     "audio1_name": {
       "type": "string",
-      "description": "Nome do arquivo do \u00c1udio 1 (usado para extrair telefone e nomear resultados)"
+      "description": "Nome do arquivo do Áudio 1"
     },
     "audio1_file_uri": {
       "type": "string",
-      "description": "URI do \u00c1udio 1 no storage privado"
+      "description": "URI do Áudio 1 no storage privado"
     },
     "audio2_file_uri": {
       "type": "string",
-      "description": "URI do \u00c1udio 2 no storage privado"
+      "description": "URI do Áudio 2 no storage privado"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Telefone do cliente formatado ou E.164"
+    },
+    "phone_digits": {
+      "type": "string",
+      "description": "Apenas os dígitos do telefone"
     },
     "status": {
       "type": "string",
       "enum": [
         "pending",
-        "isolating_1",
-        "isolating_2",
-        "processing",
-        "sending",
+        "checking_copyright",
+        "copyright_blocked",
+        "transcribing",
+        "generating_suno",
+        "separating_stems",
+        "cleaning_vocals",
+        "mastering_vocal",
+        "mixing",
+        "uploading_drive",
         "completed",
         "failed"
       ],
       "default": "pending",
       "description": "Status do processamento"
     },
-    "vocal1_uri": {
-      "type": "string",
-      "description": "URI do vocal isolado do \u00c1udio 1 no storage privado"
+    "copyright_detected": {
+      "type": "boolean",
+      "default": false
     },
-    "instrumental_uri": {
-      "type": "string",
-      "description": "URI do instrumental isolado do \u00c1udio 1 no storage privado"
+    "copyright_details": {
+      "type": "object",
+      "description": "Detalhes de direitos autorais identificados pelo Music.ai"
     },
-    "vocal2_uri": {
+    "lyrics": {
       "type": "string",
-      "description": "URI do vocal isolado do \u00c1udio 2 no storage privado"
+      "description": "Letra transcrita e organizada pelo Gemini"
     },
-    "result_url": {
+    "style_prompt": {
       "type": "string",
-      "description": "URL assinada do resultado final (mix sincronizada)"
+      "description": "Prompt musical gerado para o Suno"
     },
-    "playback_url": {
-      "type": "string",
-      "description": "URL assinada do playback (instrumental isolado)"
+    "suno_task_id": {
+      "type": "string"
+    },
+    "suno_v1_audio_url": {
+      "type": "string"
+    },
+    "suno_v2_audio_url": {
+      "type": "string"
+    },
+    "suno_v1_playback_url": {
+      "type": "string"
+    },
+    "suno_v2_playback_url": {
+      "type": "string"
+    },
+    "v1_vocal_uri": {
+      "type": "string"
+    },
+    "v1_instrumental_uri": {
+      "type": "string"
+    },
+    "v2_vocal_uri": {
+      "type": "string"
+    },
+    "v2_instrumental_uri": {
+      "type": "string"
+    },
+    "clean_vocals_uri": {
+      "type": "string"
+    },
+    "ai_mastered_uri": {
+      "type": "string"
+    },
+    "final_v1_uri": {
+      "type": "string"
+    },
+    "final_v2_uri": {
+      "type": "string"
+    },
+    "final_voz_v1_uri": {
+      "type": "string"
+    },
+    "final_voz_v2_uri": {
+      "type": "string"
+    },
+    "preview_v1_uri": {
+      "type": "string"
+    },
+    "preview_v2_uri": {
+      "type": "string"
+    },
+    "preview_voz_v1_uri": {
+      "type": "string"
+    },
+    "preview_voz_v2_uri": {
+      "type": "string"
+    },
+    "drive_folder_id": {
+      "type": "string"
+    },
+    "drive_subfolder_name": {
+      "type": "string"
+    },
+    "shared_drive_link": {
+      "type": "string"
+    },
+    "asaas_payment_id": {
+      "type": "string"
+    },
+    "pix_code": {
+      "type": "string"
+    },
+    "pix_qr_base64": {
+      "type": "string"
     },
     "error_message": {
-      "type": "string",
-      "description": "Mensagem de erro se houver falha"
+      "type": "string"
     }
   },
   "required": [
-    "audio1_name",
-    "audio1_file_uri",
-    "audio2_file_uri",
     "status"
   ]
 }
