@@ -124,3 +124,102 @@ export async function processAndMix(vocal1, vocal2, instrumental) {
 
   return { channels: mixed, sampleRate: instrumental.sampleRate };
 }
+import { decodeWavMonoAtRate, encodeWav } from "./wavCodec.ts";
+import { encodeMp3 } from "./mp3Encoder.ts";
+
+const PROCESS_RATE = 22050;
+
+/**
+ * Alinha e mixa a voz do cliente à voz de referência (IA) e ao playback instrumental.
+ * Retorna os bytes do áudio completo e da prévia de 70 segundos (1:10).
+ */
+export async function alignAndMixTrackPair(
+  refVocalBuffer: ArrayBuffer,
+  clientVocalBuffer: ArrayBuffer,
+  instrumentalBuffer: ArrayBuffer
+): Promise<{ fullWavBytes: Uint8Array; previewMp3Bytes: Uint8Array }> {
+  // 1. Carrega vocal de referência
+  const vocal1 = decodeWavMonoAtRate(refVocalBuffer, PROCESS_RATE);
+  const refDur = vocal1.channels[0].length / vocal1.sampleRate;
+  const hop = Math.max(0.04, refDur / 5000);
+
+  const refMono = toMono16kRaw(vocal1.channels, vocal1.sampleRate);
+  const refFeatures = await computeFeatures(refMono, hop);
+  const gateCurve = computeSilenceGateRaw(
+    vocal1.channels, vocal1.channels[0].length, vocal1.sampleRate
+  );
+  vocal1.channels = null;
+  refMono.fill(0);
+
+  // 2. Carrega vocal do cliente
+  const vocal2 = decodeWavMonoAtRate(clientVocalBuffer, PROCESS_RATE);
+  const vocalDur = vocal2.channels[0].length / vocal2.sampleRate;
+  const vocalHop = Math.max(0.04, Math.max(refDur, vocalDur) / 5000);
+
+  const vocalMono = toMono16kRaw(vocal2.channels, vocal2.sampleRate);
+  const vocalFeatures = await computeFeatures(vocalMono, vocalHop);
+
+  const first = vocalFeatures.active.indexOf(1);
+  const last = vocalFeatures.active.lastIndexOf(1);
+  if (first < 0 || refFeatures.active.indexOf(1) < 0) {
+    throw new Error("Não encontrei voz suficiente nos áudios para alinhar.");
+  }
+
+  const q = {
+    feats: vocalFeatures.feats.subarray(first * vocalFeatures.dim, (last + 1) * vocalFeatures.dim),
+    dim: vocalFeatures.dim,
+    nFrames: last - first + 1,
+    active: vocalFeatures.active.subarray(first, last + 1),
+  };
+  const dtw = await subsequenceDTW(q, refFeatures);
+  if (!dtw) throw new Error("Não foi possível alinhar a voz à referência.");
+
+  const tq = (i: number) => (i + first) * vocalFeatures.hop + vocalFeatures.offset;
+  const tr = (j: number) => j * refFeatures.hop + refFeatures.offset;
+  const warp = buildWarp(dtw.path, tq, tr, refFeatures.hop);
+
+  const aligned = await warpStretch(vocal2.channels, vocal2.sampleRate, warp, refDur);
+  vocal2.channels = null;
+
+  // 3. Carrega instrumental e mixa
+  const instrumental = decodeWavMonoAtRate(instrumentalBuffer, PROCESS_RATE);
+  const gated = applyGate(aligned, gateCurve, instrumental.sampleRate);
+
+  const tracks = [
+    { channels: gated, length: gated[0].length, gain: 1 },
+    { channels: instrumental.channels, length: instrumental.channels[0].length, gain: 0.8 },
+  ];
+  const gains = autoMatchGainsRaw(tracks);
+
+  const maxLen = Math.max(gated[0].length, instrumental.channels[0].length);
+  const mixed = new Float32Array(maxLen);
+
+  for (let i = 0; i < maxLen; i++) {
+    let v = 0;
+    if (i < gated[0].length) v += gated[0][i] * gains[0];
+    if (i < instrumental.channels[0].length) v += instrumental.channels[0][i] * gains[1];
+    mixed[i] = v;
+  }
+
+  // 4. Codifica WAV completo
+  const wavBytes = encodeWav([mixed], instrumental.sampleRate);
+
+  // 5. Codifica prévia de 70 segundos (1:10)
+  const previewSeconds = 70;
+  const previewLen = Math.min(mixed.length, Math.floor(previewSeconds * instrumental.sampleRate));
+  const previewChannels = [mixed.subarray(0, previewLen)];
+  const previewMp3Bytes = encodeMp3(previewChannels, instrumental.sampleRate, 192);
+
+  return { fullWavBytes: wavBytes, previewMp3Bytes };
+}
+
+/**
+ * Cria corte de prévia de 70 segundos (1:10) em MP3 a partir de um áudio qualquer
+ */
+export function create70sPreviewMp3(audioBuffer: ArrayBuffer): Uint8Array {
+  const decoded = decodeWavMonoAtRate(audioBuffer, PROCESS_RATE);
+  const previewSeconds = 70;
+  const previewLen = Math.min(decoded.channels[0].length, Math.floor(previewSeconds * decoded.sampleRate));
+  const previewChannels = [decoded.channels[0].subarray(0, previewLen)];
+  return encodeMp3(previewChannels, decoded.sampleRate, 192);
+}
