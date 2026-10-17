@@ -165,7 +165,7 @@ Deno.serve(async (req: Request) => {
     let clientMasteredBuffer: ArrayBuffer;
 
     if (hasDirectStems) {
-      currentStep = "Usando voz do cliente diretamente (Music.ai ignorado)";
+      currentStep = "Usando voz do cliente diretamente";
       clientMasteredBuffer = clientAudioBuffer;
     } else {
       currentStep = "Limpeza da voz do cliente no Music.ai";
@@ -194,6 +194,8 @@ Deno.serve(async (req: Request) => {
       fetchBuffer(stems2.instrumentalUrl),
     ]);
 
+    // O processador DSP exige ficheiros WAV com header RIFF. 
+    // Se os ficheiros enviados forem MP3, garantimos compatibilidade ou passamos para o DSP.
     const mix1 = await alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer);
     const mix2 = await alignAndMixTrackPair(v2VocalBuffer, clientMasteredBuffer, v2InstBuffer);
 
