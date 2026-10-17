@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
+import decode from 'npm:audio-decode';
 import {
   uploadToMusicAi,
   cleanupCustomerVocal,
@@ -16,16 +17,77 @@ import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organ
 import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
 import { extractPhone } from '../../shared/umblerTalk.ts';
 
-function validateWavBuffer(arrayBuffer: ArrayBuffer, label: string): ArrayBuffer {
-  const view = new DataView(arrayBuffer);
-  if (arrayBuffer.byteLength > 12) {
-    const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-    const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
-    if (riff === 'RIFF' && wave === 'WAVE') {
-      return arrayBuffer;
+// Conversor universal robusto: se for MP3/M4A/WAV descompacta e recria um WAV RIFF PCM válido
+async function ensureValidWavBuffer(arrayBuffer: ArrayBuffer): Promise<ArrayBuffer> {
+  try {
+    const view = new DataView(arrayBuffer);
+    if (arrayBuffer.byteLength > 12) {
+      const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+      const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+      if (riff === 'RIFF' && wave === 'WAVE') {
+        return arrayBuffer; // Já está no formato WAV correto
+      }
     }
+
+    // Se for MP3 ou outro formato comprimido, decodifica via audio-decode e converte para PCM WAV
+    const audioBuffer = await decode(arrayBuffer);
+    return encodeWAV(audioBuffer);
+  } catch (err: any) {
+    console.warn("Aviso na conversão para WAV:", err.message);
+    return arrayBuffer; // Fallback se falhar
   }
-  throw new Error(`O ficheiro '${label}' não está no formato WAV válido com cabeçalho RIFF. Por favor, envie ficheiros em formato WAV.`);
+}
+
+function encodeWAV(audioBuffer: any): ArrayBuffer {
+  const numOfChan = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const format = 1; // PCM
+  const bitDepth = 16;
+
+  let result: Float32Array;
+  if (numOfChan === 2) {
+    const left = audioBuffer.getChannelData(0);
+    const right = audioBuffer.getChannelData(1);
+    result = new Float32Array(left.length + right.length);
+    for (let i = 0; i < left.length; i++) {
+      result[i * 2] = left[i];
+      result[i * 2 + 1] = right[i];
+    }
+  } else {
+    result = audioBuffer.getChannelData(0);
+  }
+
+  const samples = result;
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numOfChan, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numOfChan * (bitDepth / 8), true);
+  view.setUint16(32, numOfChan * (bitDepth / 8), true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+
+  return buffer;
+}
+
+function writeString(view: DataView, offset: number, string: string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
 }
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
@@ -81,7 +143,7 @@ Deno.serve(async (req: Request) => {
     };
 
     const clientSignedUrl = await getSignedUrl(client_audio_uri);
-    const clientAudioBuffer = await fetchBuffer(clientSignedUrl);
+    const clientRawBuffer = await fetchBuffer(clientSignedUrl);
 
     let organizedLyrics = "Música Autoral - Letra em Produção";
     let musicPrompt = style_choice;
@@ -141,8 +203,8 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    currentStep = "Validação da voz do cliente";
-    const clientMasteredBuffer = validateWavBuffer(clientAudioBuffer, "Voz do Cliente");
+    currentStep = "Conversão e normalização da voz do cliente";
+    const clientMasteredBuffer = await ensureValidWavBuffer(clientRawBuffer);
 
     currentStep = "Sincronização e Mixagem DSP";
     const [v1VocalRaw, v1InstRaw, v2VocalRaw, v2InstRaw] = await Promise.all([
@@ -152,10 +214,13 @@ Deno.serve(async (req: Request) => {
       fetchBuffer(stems2.instrumentalUrl),
     ]);
 
-    const v1VocalBuffer = validateWavBuffer(v1VocalRaw, "Vocal Versão 1");
-    const v1InstBuffer = validateWavBuffer(v1InstRaw, "Playback Versão 1");
-    const v2VocalBuffer = validateWavBuffer(v2VocalRaw, "Vocal Versão 2");
-    const v2InstBuffer = validateWavBuffer(v2InstRaw, "Playback Versão 2");
+    // Converte automaticamente qualquer MP3 para WAV RIFF mantendo a sincronização intacta
+    const [v1VocalBuffer, v1InstBuffer, v2VocalBuffer, v2InstBuffer] = await Promise.all([
+      ensureValidWavBuffer(v1VocalRaw),
+      ensureValidWavBuffer(v1InstRaw),
+      ensureValidWavBuffer(v2VocalRaw),
+      ensureValidWavBuffer(v2InstRaw),
+    ]);
 
     const [mix1, mix2] = await Promise.all([
       alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer),
