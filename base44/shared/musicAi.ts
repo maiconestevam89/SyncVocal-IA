@@ -73,7 +73,7 @@ export async function createMusicAiJob(
 ): Promise<string> {
   const payload = {
     name,
-    workflowId,
+    workflow: workflowId
     params,
   };
 
