@@ -1,3 +1,5 @@
+import { secrets } from "base44:runtime";
+
 function base64UrlEncode(bufferOrStr: Uint8Array | string): string {
   let base64 = "";
   if (typeof bufferOrStr === "string") {
@@ -148,15 +150,25 @@ export async function findOrCreateFolder(
 }
 
 /**
- * Garante a criação de uma hierarquia completa de pastas (ex: ["MM Music", "2026", "Clientes", "11 98803-2049"])
+ * Garante a criação de uma hierarquia completa de pastas
  */
 export async function ensureFolderHierarchy(
   accessToken: string,
   pathSegments: string[],
   rootParentId = "root"
 ): Promise<DriveItem> {
-  let currentParentId = rootParentId;
-  let currentFolder: DriveItem = { id: rootParentId, name: "root", mimeType: "application/vnd.google-apps.folder" };
+  // Pega o ID fixo dos secrets caso seja a raiz "MM Music", senão usa o padrão passado
+  let resolvedRootId = rootParentId;
+  if (pathSegments.length > 0 && pathSegments[0] === "MM Music") {
+    const secretRoot = secrets.got("DRIVE_ROOT_FOLDER_ID");
+    if (secretRoot) {
+      resolvedRootId = secretRoot.trim();
+      pathSegments = pathSegments.slice(1); // Remove "MM Music" da lista pois já estamos dentro dela pelo ID fixo
+    }
+  }
+
+  let currentParentId = resolvedRootId;
+  let currentFolder: DriveItem = { id: resolvedRootId, name: "MM Music", mimeType: "application/vnd.google-apps.folder" };
 
   for (const segment of pathSegments) {
     currentFolder = await findOrCreateFolder(accessToken, segment, currentParentId);
