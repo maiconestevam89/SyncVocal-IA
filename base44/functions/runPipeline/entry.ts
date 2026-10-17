@@ -4,7 +4,6 @@ import {
   uploadToMusicAi,
   cleanupCustomerVocal,
   masterCustomerVocal,
-  separateAudioWithMusicAi,
 } from '../../shared/musicAi.ts';
 import {
   createSunoGenerationTask,
@@ -37,26 +36,33 @@ Deno.serve(async (req: Request) => {
       phone: rawPhone,
       customer_name,
       style_choice = "Pop",
-      pre_generated_v1_uri,
-      pre_generated_v2_uri,
+      pre_generated_v1_vocal_uri,
+      pre_generated_v1_instrumental_uri,
+      pre_generated_v2_vocal_uri,
+      pre_generated_v2_instrumental_uri,
     } = body;
     jobId = body.job_id;
 
     if (!client_audio_uri) {
-      return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório." });
+      return Response.json({ success: false, error: "Arquivo de áudio da voz é obrigatório." }, { status: 200 });
     }
 
-    const hasPreGenerated = Boolean(pre_generated_v1_uri && pre_generated_v2_uri);
+    const hasDirectStems = Boolean(
+      pre_generated_v1_vocal_uri &&
+      pre_generated_v1_instrumental_uri &&
+      pre_generated_v2_vocal_uri &&
+      pre_generated_v2_instrumental_uri
+    );
 
     const musicAiKey = secrets.get("MUSIC_AI_API_KEY") || process.env["MUSIC_AI_API_KEY"];
     if (!musicAiKey || !musicAiKey.trim()) {
-      return Response.json({ success: false, error: "Chave MUSIC_AI_API_KEY ausente." });
+      return Response.json({ success: false, error: "Chave MUSIC_AI_API_KEY ausente." }, { status: 200 });
     }
 
-    if (!hasPreGenerated) {
+    if (!hasDirectStems) {
       const sunoKey = secrets.get("SUNO_API_KEY");
       if (!sunoKey || !sunoKey.trim()) {
-        return Response.json({ success: false, error: "Chave SUNO_API_KEY ausente." });
+        return Response.json({ success: false, error: "Chave SUNO_API_KEY ausente." }, { status: 200 });
       }
     }
 
@@ -81,29 +87,38 @@ Deno.serve(async (req: Request) => {
 
     let organizedLyrics = "Música Autoral - Letra em Produção";
     let musicPrompt = style_choice;
-    let sunoV1Buffer: ArrayBuffer;
-    let sunoV2Buffer: ArrayBuffer;
     let stems1: { vocalUrl: string; instrumentalUrl: string };
     let stems2: { vocalUrl: string; instrumentalUrl: string };
-    let sunoTaskId: string = hasPreGenerated ? "pre_generated_by_user" : "";
+    let sunoTaskId: string = hasDirectStems ? "direct_stems_by_user" : "";
     let v1AudioUrl = "";
     let v2AudioUrl = "";
+    let sunoV1Buffer: ArrayBuffer = new ArrayBuffer(0);
+    let sunoV2Buffer: ArrayBuffer = new ArrayBuffer(0);
 
-    if (hasPreGenerated) {
-      currentStep = "Carregando versões fornecidas";
-      await updateStatus("using_pregenerated");
+    if (hasDirectStems) {
+      currentStep = "Carregando vocais e playbacks fornecidos";
+      await updateStatus("using_direct_stems");
 
-      const [{ signed_url: v1SignedUrl }, { signed_url: v2SignedUrl }] = await Promise.all([
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_uri, expires_in: 3600 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_uri, expires_in: 3600 }),
+      const [
+        { signed_url: v1VocalSignedUrl },
+        { signed_url: v1InstSignedUrl },
+        { signed_url: v2VocalSignedUrl },
+        { signed_url: v2InstSignedUrl },
+      ] = await Promise.all([
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_vocal_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v1_instrumental_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_vocal_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: pre_generated_v2_instrumental_uri, expires_in: 3600 }),
       ]);
 
-      v1AudioUrl = v1SignedUrl;
-      v2AudioUrl = v2SignedUrl;
+      stems1 = { vocalUrl: v1VocalSignedUrl, instrumentalUrl: v1InstSignedUrl };
+      stems2 = { vocalUrl: v2VocalSignedUrl, instrumentalUrl: v2InstSignedUrl };
+      v1AudioUrl = v1InstSignedUrl;
+      v2AudioUrl = v2InstSignedUrl;
 
       [sunoV1Buffer, sunoV2Buffer] = await Promise.all([
-        fetchBuffer(v1SignedUrl),
-        fetchBuffer(v2SignedUrl),
+        fetchBuffer(v1InstSignedUrl),
+        fetchBuffer(v2InstSignedUrl),
       ]);
 
       try {
@@ -112,13 +127,6 @@ Deno.serve(async (req: Request) => {
       } catch (err: any) {
         console.warn("[transcribe] aviso:", err.message);
       }
-
-      currentStep = "Separação de stems com Music.ai";
-      await updateStatus("separating_stems");
-      [stems1, stems2] = await Promise.all([
-        separateAudioWithMusicAi(sunoV1Buffer, "V1 Stems"),
-        separateAudioWithMusicAi(sunoV2Buffer, "V2 Stems"),
-      ]);
     } else {
       currentStep = "Transcrição e organização da letra";
       await updateStatus("transcribing");
@@ -222,8 +230,6 @@ Deno.serve(async (req: Request) => {
       suno_task_id: sunoTaskId,
       suno_v1_audio_url: v1AudioUrl,
       suno_v2_audio_url: v2AudioUrl,
-      suno_v1_playback_url: stems1.instrumentalUrl,
-      suno_v2_playback_url: stems2.instrumentalUrl,
       final_v1_uri: finalOrig1Upload.file_uri,
       final_v2_uri: finalOrig2Upload.file_uri,
       final_voz_v1_uri: finalVoz1Upload.file_uri,
@@ -255,19 +261,19 @@ Deno.serve(async (req: Request) => {
       }
     });
   } catch (err: any) {
-    console.error(`[runPipeline CRITICAL ERROR]:`, err);
+    console.error(`[runPipeline CRITICAL ERROR at step '${currentStep}']:`, err);
     if (jobId && base44) {
       try { 
         await base44.asServiceRole.entities.ProcessingJob.update(jobId, { 
           status: "failed", 
-          error_message: `${err.message || "Erro desconhecido"}` 
+          error_message: `${currentStep}: ${err.message || "Erro desconhecido"}` 
         }); 
       } catch {}
     }
-    // Devolve o erro limpo com status 200 para o front-end conseguir ler a mensagem exata na tela
     return Response.json({ 
       success: false, 
-      error: err.message || "Erro interno no servidor",
+      error: `Erro [${currentStep}]: ${err.message || "Erro interno no servidor"}`,
+      step: currentStep,
       stack: err.stack || ""
     }, { status: 200 });
   }
