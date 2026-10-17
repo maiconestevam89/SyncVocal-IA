@@ -1,7 +1,7 @@
 import { secrets } from "base44:runtime";
 
 export function getSunoConfig() {
-  const rawBase = (secrets.get("SUNO_API_BASE_URL") || "")
+  const rawBase = (secrets.get("SUNO_API_BASE_URL") || "https://api.apipass.dev")
     .trim()
     .replace(/[\[\]\s]+/g, "")
     .replace(/\/+$/, "");
@@ -11,10 +11,10 @@ export function getSunoConfig() {
     .replace(/^Bearer/i, "")
     .trim();
 
-  if (!apiKey || !rawBase) {
-    throw new Error("Credenciais do Suno não configuradas (SUNO_API_KEY / SUNO_API_BASE_URL).");
+  if (!apiKey) {
+    throw new Error("Credencial do Suno não configurada. Defina SUNO_API_KEY nos secrets.");
   }
-  return { baseUrl: rawBase, apiKey };
+  return { baseUrl: rawBase || "https://api.apipass.dev", apiKey };
 }
 
 export async function sunoRequest(path: string, options: RequestInit = {}): Promise<any> {
@@ -43,6 +43,7 @@ export async function sunoRequest(path: string, options: RequestInit = {}): Prom
         errorJson.msg ||
         errorJson.error ||
         errorJson.detail ||
+        (errorJson.errors && errorJson.errors[0] && errorJson.errors[0].description) ||
         errorMessage;
     } catch {
       if (errorText) errorMessage = errorText;
@@ -199,7 +200,6 @@ export async function pollSunoStems(taskId: string, maxWaitMs = 360000): Promise
         }
       }
 
-      // Se não identificou por tipo específico, assume primeira = vocal e segunda = instrumental
       if (!vocalUrl && stems[0]?.audio_url) vocalUrl = stems[0].audio_url;
       if (!instrumentalUrl && stems[1]?.audio_url) instrumentalUrl = stems[1].audio_url;
 
