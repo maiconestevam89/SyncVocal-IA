@@ -214,7 +214,7 @@ Deno.serve(async (req: Request) => {
     ]);
 
     const completedData = {
-      status: "completed_awaiting_drive", // Novo status intermediário
+      status: "completed",
       phone: customerPhoneStr,
       phone_digits: phoneDigits,
       lyrics: organizedLyrics,
@@ -238,11 +238,6 @@ Deno.serve(async (req: Request) => {
       try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, completedData); } catch {}
     }
 
-    return Response.json({ success: true, job: completedData });
-  } catch (err: any) {
-    if (jobId && base44) {
-      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, { status: "failed", error_message: `${currentStep}: ${err.message}` }); } catch {}
-    }
     return Response.json({
       success: true,
       job: completedData,
@@ -259,3 +254,11 @@ Deno.serve(async (req: Request) => {
         previa_voz_2: previaVoz2Upload.signed_url,
       }
     });
+  } catch (err: any) {
+    console.error(`[runPipeline error at step '${currentStep}']:` , err);
+    if (jobId && base44) {
+      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, { status: "failed", error_message: `${currentStep}: ${err.message}` }); } catch {}
+    }
+    return Response.json({ success: false, error: `Erro [${currentStep}]: ${err.message}`, step: currentStep }, { status: 200 });
+  }
+});
