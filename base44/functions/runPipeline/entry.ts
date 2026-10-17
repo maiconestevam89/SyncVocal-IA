@@ -255,10 +255,20 @@ Deno.serve(async (req: Request) => {
       }
     });
   } catch (err: any) {
-    console.error(`[runPipeline error at step '${currentStep}']:` , err);
+    console.error(`[runPipeline CRITICAL ERROR]:`, err);
     if (jobId && base44) {
-      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, { status: "failed", error_message: `${currentStep}: ${err.message}` }); } catch {}
+      try { 
+        await base44.asServiceRole.entities.ProcessingJob.update(jobId, { 
+          status: "failed", 
+          error_message: `${err.message || "Erro desconhecido"}` 
+        }); 
+      } catch {}
     }
-    return Response.json({ success: false, error: `Erro [${currentStep}]: ${err.message}`, step: currentStep }, { status: 200 });
+    // Devolve o erro limpo com status 200 para o front-end conseguir ler a mensagem exata na tela
+    return Response.json({ 
+      success: false, 
+      error: err.message || "Erro interno no servidor",
+      stack: err.stack || ""
+    }, { status: 200 });
   }
 });
