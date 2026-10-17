@@ -221,7 +221,9 @@ export default function Landing() {
         payload.pre_generated_v2_instrumental_uri = v2InstUri;
       }
 
+      console.log("Enviando payload para runPipeline:", payload);
       const res = await base44.functions.invoke("runPipeline", payload);
+      console.log("Resposta recebida do runPipeline:", res);
 
       if (res.data?.success) {
         setJobResults(res.data);
@@ -231,12 +233,9 @@ export default function Landing() {
         throw new Error(errorMsg);
       }
     } catch (err) {
-      console.error("Erro no pipeline:", err);
-      setDetailedError({
-        message: err.message || "Erro de processamento",
-        step: pipelineMessage,
-      });
-      setFlowStage("error");
+      console.error("Erro capturado no executePipeline:", err);
+      setFormError(`Erro no processamento: ${err.message || err}`);
+      setFlowStage("initial");
     }
   };
 
