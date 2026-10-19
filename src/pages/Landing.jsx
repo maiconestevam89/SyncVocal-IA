@@ -228,6 +228,58 @@ export default function Landing() {
     executePipeline(activeClientUri);
   };
 
+  const finishAsyncMix = async (startResponse) => {
+    const startData = startResponse?.data || startResponse;
+    const jobIds = startData?.jobIds;
+    if (!startData?.success || !Array.isArray(jobIds) || jobIds.length !== 2) {
+      throw new Error(startData?.error || "Não foi possível iniciar a mixagem em segundo plano.");
+    }
+
+    let completedJobs = null;
+    for (let attempt = 0; attempt < 180; attempt++) {
+      let currentJobs = null;
+      try {
+        currentJobs = await Promise.all(jobIds.map((id) => base44.entities.ProcessingJob.get(id)));
+      } catch (pollError) {
+        console.warn("Falha temporária ao consultar a mixagem; tentando novamente.", pollError?.message || pollError);
+      }
+
+      if (currentJobs) {
+        const failedJob = currentJobs.find((job) => job?.status === "failed");
+        if (failedJob) {
+          throw new Error(failedJob.error_message || "Falha ao mixar uma das versões.");
+        }
+        if (currentJobs.every((job) => job?.status === "completed")) {
+          completedJobs = currentJobs;
+          break;
+        }
+      }
+
+      const elapsedSeconds = (attempt + 1) * 4;
+      setPipelineMessage("Passo 3/3: Mixagem em segundo plano (" + elapsedSeconds + "s)...");
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+
+    if (!completedJobs) {
+      throw new Error("A mixagem não concluiu dentro do tempo esperado. Consulte o status do job antes de iniciar outra produção.");
+    }
+
+    const [job1, job2] = completedJobs;
+    const finalResponse = await base44.functions.invoke("runPipeline", {
+      action: "finalize_mix",
+      jobId: job1.id,
+      otherJobId: job2.id,
+      phone,
+    });
+    const finalData = finalResponse.data || finalResponse;
+    if (!finalData?.success) {
+      throw new Error(finalData?.error || "Não foi possível finalizar os downloads da produção.");
+    }
+
+    setJobResults(finalData);
+    setFlowStage("ready");
+  };
+
   const executePipeline = async (clientUri) => {
     setFlowStage("processing");
     const isPreGen = arrangementMode === "pre_generated";
@@ -235,9 +287,10 @@ export default function Landing() {
 
     try {
       if (isPreGen) {
-        // FLUXO STEMS: Execução direta otimizada (sem transcrição pesada, conclui em ~10s sem 504)
+        // FLUXO STEMS: inicia jobs de mixagem assíncronos para não manter a requisição aberta.
         setPipelineMessage("Mixando sua voz com os stems e gerando arquivos WAV e MP3...");
         const payload = {
+          action: "start_mix",
           client_audio_uri: clientUri,
           clientAudioFileUri: clientUri,
           phone,
@@ -255,12 +308,7 @@ export default function Landing() {
 
         console.log("Disparando runPipeline (Stems diretos):", payload);
         const res = await base44.functions.invoke("runPipeline", payload);
-        if (res.data?.success) {
-          setJobResults(res.data);
-          setFlowStage("ready");
-        } else {
-          throw new Error(res.data?.error || "Falha ao processar os stems.");
-        }
+        await finishAsyncMix(res);
       } else {
         // FLUXO SUNO IA: Ciclo modular assíncrono para eliminar 504 por timeout
         setPipelineMessage("Passo 1/3: Criando arranjo musical com IA (Suno)...");
@@ -335,6 +383,7 @@ export default function Landing() {
         // Passo 3: Mixar e sincronizar a voz do cliente
         setPipelineMessage("Passo 3/3: Sincronizando sua voz e gerando masters...");
         const mixRes = await base44.functions.invoke("runPipeline", {
+          action: "start_mix",
           client_audio_uri: clientUri,
           clientAudioFileUri: clientUri,
           phone,
@@ -342,13 +391,7 @@ export default function Landing() {
           stems1,
           stems2,
         });
-
-        if (mixRes.data?.success) {
-          setJobResults(mixRes.data);
-          setFlowStage("ready");
-        } else {
-          throw new Error(mixRes.data?.error || "Falha na sincronização e mixagem.");
-        }
+        await finishAsyncMix(mixRes);
       }
     } catch (err) {
       console.error("Erro capturado no executePipeline:", err);
@@ -362,8 +405,8 @@ export default function Landing() {
     setSendingPreview(true);
     try {
       const res = await base44.functions.sendUmblerPreview({
-        job_id: jobResults?.job?.id || currentJobId,
-        phone: customerPhone || jobResults?.job?.phone,
+        job_id: jobResults?.job?.id || jobResults?.job_id,
+        phone: phone || jobResults?.job?.phone,
         customer_name: customerName,
       });
       if (res.data?.success) {
