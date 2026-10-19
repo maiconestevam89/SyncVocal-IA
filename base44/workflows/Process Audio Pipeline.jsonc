@@ -20,6 +20,43 @@
     },
     "do": [
       {
+        "route_direct_stems": {
+          "switch": [
+            {
+              "when": "${ .trigger.data.direct_stems == true }",
+              "then": "process_direct_stems"
+            },
+            {
+              "when": "${ true }",
+              "then": "start1"
+            }
+          ],
+          "x-base44": {
+            "title": "Escolher processamento de stems"
+          }
+        }
+      },
+      {
+        "process_direct_stems": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "processAndSync",
+            "args": {
+              "job_id": "${ .trigger.entity_id }",
+              "vocal1_uri": "${ .trigger.data.vocal1_uri }",
+              "vocal2_uri": "${ .trigger.data.vocal2_uri }",
+              "instrumental_uri": "${ .trigger.data.instrumental_uri }",
+              "version": "${ .trigger.data.version }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Mixar stems pre-separadas",
+            "description": "Pula o isolamento no kits.ai"
+          }
+        }
+      },
+      {
         "start1": {
           "call": "invoke_backend_function",
           "with": {
