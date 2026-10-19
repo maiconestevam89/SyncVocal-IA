@@ -271,6 +271,27 @@ export default function Landing() {
     });
   };
 
+  const invokeWithRetry = async (fnName, payload, maxRetries = 2) => {
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await base44.functions.invoke(fnName, payload);
+      } catch (err) {
+        lastError = err;
+        const status = err?.response?.status;
+        const msg = String(err?.message || "");
+        const isTimeoutOrGateway = status === 504 || status === 502 || status === 503 || msg.includes("504") || msg.includes("timeout");
+        if (isTimeoutOrGateway && attempt < maxRetries) {
+          console.warn(`Tentativa ${attempt + 1} de invoke(${fnName}) falhou com timeout/gateway (${status || msg}). Repetindo em 2s...`);
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError;
+  };
+
   const finishAsyncMix = async (startResponse) => {
     const startData = startResponse?.data || startResponse;
     const jobIds = startData?.jobIds;
@@ -355,7 +376,7 @@ export default function Landing() {
         };
 
         console.log("Disparando runPipeline (Stems diretos):", payload);
-        const res = await base44.functions.invoke("runPipeline", payload);
+        const res = await invokeWithRetry("runPipeline", payload);
         if (res.data?.error || res.data?.success === false) {
           throw new Error(res.data?.error || "Erro no processamento da mixagem.");
         }

@@ -30,7 +30,7 @@ async function uploadAudioFile(base44: any, buffer: ArrayBuffer, filename: strin
   return { fileUri, signedUrl: signedRes.signed_url };
 }
 
-const handler = async (req: Request): Promise<Response> => {
+export default async function (req: Request): Promise<Response> {
   let base44: any = null;
   try {
     base44 = createClientFromRequest(req);
@@ -370,11 +370,3 @@ const handler = async (req: Request): Promise<Response> => {
     }, { status: 500 });
   }
 };
-
-export default handler;
-
-if (typeof (globalThis as any).Deno?.serve === "function") {
-  try {
-    (globalThis as any).Deno.serve(handler);
-  } catch {}
-}

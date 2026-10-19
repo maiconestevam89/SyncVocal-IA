@@ -29,7 +29,7 @@ export async function sunoRequest(path: string, options: RequestInit = {}): Prom
       "Content-Type": "application/json",
       ...options.headers,
     },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(8000),
   });
 
   if (!response.ok) {

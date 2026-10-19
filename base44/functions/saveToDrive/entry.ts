@@ -14,7 +14,7 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   return buf;
 }
 
-const handler = async (req: Request): Promise<Response> => {
+export default async function (req: Request): Promise<Response> {
   let base44: any = null;
 
   try {
@@ -62,13 +62,4 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (err: any) {
     return Response.json({ success: false, error: err.message });
   }
-});
-
-
-export default handler;
-
-if (typeof (globalThis as any).Deno?.serve === "function") {
-  try {
-    (globalThis as any).Deno.serve(handler);
-  } catch {}
 }
