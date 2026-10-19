@@ -233,33 +233,116 @@ export default function Landing() {
     const isPreGen = arrangementMode === "pre_generated";
     const styleToUse = customStyle.trim() || selectedStyle;
 
-    setPipelineMessage(isPreGen ? "Processando vocais e playbacks..." : "Gerando arranjos e mixando áudios...");
-
     try {
-      const payload = {
-        client_audio_uri: clientUri,
-        phone,
-        customer_name: customerName,
-        style_choice: styleToUse,
-      };
-
       if (isPreGen) {
-        payload.pre_generated_v1_vocal_uri = v1VocalUri;
-        payload.pre_generated_v1_instrumental_uri = v1InstUri;
-        if (v2VocalUri) payload.pre_generated_v2_vocal_uri = v2VocalUri;
-        if (v2InstUri) payload.pre_generated_v2_instrumental_uri = v2InstUri;
-      }
+        // FLUXO STEMS: Execução direta otimizada (sem transcrição pesada, conclui em ~10s sem 504)
+        setPipelineMessage("Mixando sua voz com os stems e gerando arquivos WAV e MP3...");
+        const payload = {
+          client_audio_uri: clientUri,
+          phone,
+          customer_name: customerName,
+          hasDirectStems: true,
+          pre_generated_v1_vocal_uri: v1VocalUri,
+          pre_generated_v1_instrumental_uri: v1InstUri,
+          pre_generated_v2_vocal_uri: v2VocalUri || v1VocalUri,
+          pre_generated_v2_instrumental_uri: v2InstUri || v1InstUri,
+        };
 
-      console.log("Disparando runPipeline com payload:", payload);
-      const res = await base44.functions.invoke("runPipeline", payload);
-      console.log("Resposta do servidor:", res);
-
-      if (res.data?.success) {
-        setJobResults(res.data);
-        setFlowStage("ready");
+        console.log("Disparando runPipeline (Stems diretos):", payload);
+        const res = await base44.functions.invoke("runPipeline", payload);
+        if (res.data?.success) {
+          setJobResults(res.data);
+          setFlowStage("ready");
+        } else {
+          throw new Error(res.data?.error || "Falha ao processar os stems.");
+        }
       } else {
-        const errorMsg = res.data?.error || res.data?.message || "Falha na produção do áudio";
-        throw new Error(errorMsg);
+        // FLUXO SUNO IA: Ciclo modular assíncrono para eliminar 504 por timeout
+        setPipelineMessage("Passo 1/3: Criando arranjo musical com IA (Suno)...");
+        const sunoInit = await base44.functions.invoke("runPipeline", {
+          action: "create_suno",
+          lyrics: customerLyrics || "Música personalizada",
+          musicPrompt: styleToUse,
+        });
+
+        if (!sunoInit.data?.taskId) {
+          throw new Error(sunoInit.data?.error || "Não foi possível iniciar a geração musical.");
+        }
+        const taskId = sunoInit.data.taskId;
+
+        // Polling do Suno
+        let sunoData = null;
+        let attempts = 0;
+        while (!sunoData && attempts < 40) {
+          attempts++;
+          await new Promise((r) => setTimeout(r, 4000));
+          setPipelineMessage(`Passo 1/3: Aguardando arranjo musical do Suno (${attempts * 4}s)...`);
+          const pollRes = await base44.functions.invoke("runPipeline", {
+            action: "poll_suno",
+            taskId,
+          });
+          if (pollRes.data?.status === "SUCCESS") {
+            sunoData = pollRes.data.result;
+          } else if (pollRes.data?.status === "ERROR") {
+            throw new Error(pollRes.data.error || "Erro na geração do Suno.");
+          }
+        }
+
+        if (!sunoData) throw new Error("Tempo limite excedido na criação do arranjo.");
+
+        // Passo 2: Separar stems no Suno
+        setPipelineMessage("Passo 2/3: Separando faixas de voz e playback...");
+        const stemTask1 = await base44.functions.invoke("runPipeline", {
+          action: "create_stems",
+          taskId,
+          audioId: sunoData.version1.audioId,
+        });
+        const stemTask2 = await base44.functions.invoke("runPipeline", {
+          action: "create_stems",
+          taskId,
+          audioId: sunoData.version2.audioId,
+        });
+
+        const id1 = stemTask1.data?.stemTaskId;
+        const id2 = stemTask2.data?.stemTaskId;
+        if (!id1 || !id2) throw new Error("Falha ao iniciar separação de stems.");
+
+        // Polling das Stems
+        let stems1 = null;
+        let stems2 = null;
+        attempts = 0;
+        while ((!stems1 || !stems2) && attempts < 30) {
+          attempts++;
+          await new Promise((r) => setTimeout(r, 4000));
+          setPipelineMessage(`Passo 2/3: Extraindo faixas isoladas (${attempts * 4}s)...`);
+          if (!stems1) {
+            const p1 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id1 });
+            if (p1.data?.status === "SUCCESS") stems1 = p1.data.stems;
+          }
+          if (!stems2) {
+            const p2 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id2 });
+            if (p2.data?.status === "SUCCESS") stems2 = p2.data.stems;
+          }
+        }
+
+        if (!stems1 || !stems2) throw new Error("Tempo limite excedido na extração de stems.");
+
+        // Passo 3: Mixar e sincronizar a voz do cliente
+        setPipelineMessage("Passo 3/3: Sincronizando sua voz e gerando masters...");
+        const mixRes = await base44.functions.invoke("runPipeline", {
+          client_audio_uri: clientUri,
+          phone,
+          customer_name: customerName,
+          stems1,
+          stems2,
+        });
+
+        if (mixRes.data?.success) {
+          setJobResults(mixRes.data);
+          setFlowStage("ready");
+        } else {
+          throw new Error(mixRes.data?.error || "Falha na sincronização e mixagem.");
+        }
       }
     } catch (err) {
       console.error("Erro capturado no executePipeline:", err);

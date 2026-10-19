@@ -1,330 +1,294 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
-import { secrets } from 'base44:runtime';
-import {
-  uploadToMusicAi,
-  cleanupCustomerVocal,
-  masterCustomerVocal,
-} from '../../shared/musicAi.ts';
+import { Deno } from "base44:runtime";
+import { base44 } from "base44:runtime";
 import {
   createSunoGenerationTask,
   pollSunoGeneration,
   createSunoStemTask,
   pollSunoStems,
-} from '../../shared/suno.ts';
-import { transcribeAudioUrl } from '../../shared/transcription.ts';
-import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organizeLyrics.ts';
-import { alignAndMixTrackPair, create70sPreviewMp3, convertToWavAndMp3 } from '../../shared/audioProcessor.ts';
-import { extractPhone } from '../../shared/umblerTalk.ts';
+} from "../../shared/suno.ts";
+import {
+  alignAndMixTrackPair,
+  create70sPreviewMp3,
+  convertToWavAndMp3,
+} from "../../shared/audioProcessor.ts";
 
-// Injeta um cabeçalho RIFF WAV válido garantindo compatibilidade total com o DSP sem falhas
 function ensureValidWavHeader(arrayBuffer: ArrayBuffer): ArrayBuffer {
   const bytes = new Uint8Array(arrayBuffer);
-  
-  // Verifica se já tem o cabeçalho RIFF
-  if (bytes.length > 12) {
-    const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-    const wave = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
-    if (riff === 'RIFF' && wave === 'WAVE') {
-      return arrayBuffer;
-    }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45
+  ) {
+    return arrayBuffer;
   }
-
-  // Se não tiver, cria um container WAV válido (PCM 16-bit, 44100Hz, estéreo) envolvendo os dados brutos
-  const sampleRate = 44100;
-  const channels = 2;
+  const sampleRate = 22050;
+  const numChannels = 1;
   const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
   const dataSize = bytes.length;
   const chunkSize = 36 + dataSize;
-  
   const wavHeader = new ArrayBuffer(44);
   const view = new DataView(wavHeader);
 
-  // "RIFF" chunk descriptor
-  view.setUint8(0, 0x52); view.setUint8(1, 0x49); view.setUint8(2, 0x46); view.setUint8(3, 0x46);
+  view.setUint32(0, 0x52494646, false); // "RIFF"
   view.setUint32(4, chunkSize, true);
-  view.setUint8(8, 0x57); view.setUint8(9, 0x41); view.setUint8(10, 0x56); view.setUint8(11, 0x45);
-
-  // "fmt " sub-chunk
-  view.setUint8(12, 0x66); view.setUint8(13, 0x6d); view.setUint8(14, 0x74); view.setUint8(15, 0x20);
-  view.setUint32(16, 16, true); // SubChunk1Size (16 for PCM)
-  view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
-  view.setUint16(22, channels, true); // NumChannels
-  view.setUint32(24, sampleRate, true); // SampleRate
-  view.setUint32(28, sampleRate * channels * (bitsPerSample / 8), true); // ByteRate
-  view.setUint16(32, channels * (bitsPerSample / 8), true); // BlockAlign
-  view.setUint16(34, bitsPerSample, true); // BitsPerSample
-
-  // "data" sub-chunk
-  view.setUint8(36, 0x64); view.setUint8(37, 0x61); view.setUint8(38, 0x74); view.setUint8(39, 0x61);
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  view.setUint32(36, 0x64617461, false); // "data"
   view.setUint32(40, dataSize, true);
 
   const combined = new Uint8Array(44 + bytes.length);
   combined.set(new Uint8Array(wavHeader), 0);
   combined.set(bytes, 44);
-
   return combined.buffer;
 }
 
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
-  if (!res.ok) throw new Error(`Falha ao descarregar áudio (${res.status}): ${url}`);
-  const buf = await res.arrayBuffer();
-  return buf instanceof ArrayBuffer ? buf : new Uint8Array(buf).buffer;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Falha ao baixar áudio (${res.status}): ${url}`);
+  return res.arrayBuffer();
+}
+
+async function uploadAudioFile(buffer: ArrayBuffer, filename: string, mime: string) {
+  const fileObj = new File([buffer], filename, { type: mime });
+  const uploadRes = await base44.asServiceRole.integrations.Core.UploadPrivateFile({
+    file: fileObj,
+  });
+  const fileUri = uploadRes.file_uri;
+  const signedRes = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+    file_uri: fileUri,
+    expires_in: 86400 * 7,
+  });
+  return { fileUri, signedUrl: signedRes.signed_url };
 }
 
 Deno.serve(async (req: Request) => {
-  let jobId: string | null = null;
-  let base44: any = null;
-  let currentStep = "Inicialização";
-
   try {
-    base44 = createClientFromRequest(req);
-    const body = await req.json();
+    const payload = await req.json();
     const {
-      client_audio_uri,
-      phone: rawPhone,
-      customer_name,
-      style_choice = "Pop",
-      pre_generated_v1_vocal_uri,
-      pre_generated_v1_instrumental_uri,
-      pre_generated_v2_vocal_uri,
-      pre_generated_v2_instrumental_uri,
-    } = body;
-    jobId = body.job_id;
+      action,
+      jobId,
+      lyrics,
+      musicPrompt,
+      clientAudioFileUri,
+      hasDirectStems,
+      v1VocalFileUri,
+      v1InstFileUri,
+      v2VocalFileUri,
+      v2InstFileUri,
+      stems1: providedStems1,
+      stems2: providedStems2,
+      phone,
+    } = payload;
 
-    if (!client_audio_uri) {
-      return Response.json({ success: false, error: "O ficheiro de áudio da voz é obrigatório." }, { status: 200 });
+    // Ações modulares assíncronas para Suno (evitam timeout 504 no frontend)
+    if (action === "create_suno") {
+      const taskId = await createSunoGenerationTask({
+        lyrics: lyrics || "Música personalizada",
+        stylePrompt: musicPrompt || "Pop, upbeat, radio mix",
+      });
+      return Response.json({ success: true, taskId });
     }
 
-    const hasDirectStems = Boolean(
-      pre_generated_v1_vocal_uri &&
-      pre_generated_v1_instrumental_uri
-    );
+    if (action === "poll_suno") {
+      const taskId = payload.taskId;
+      if (!taskId) return Response.json({ error: "taskId é obrigatório" }, { status: 400 });
+      try {
+        const result = await pollSunoGeneration(taskId, 7000);
+        return Response.json({ status: "SUCCESS", result });
+      } catch (err: any) {
+        const msg = String(err?.message || "");
+        if (msg.includes("Tempo limite") || msg.includes("timeout")) {
+          return Response.json({ status: "PENDING" });
+        }
+        return Response.json({ status: "ERROR", error: msg });
+      }
+    }
 
-    const effectiveV2VocalUri = pre_generated_v2_vocal_uri || pre_generated_v1_vocal_uri;
-    const effectiveV2InstUri = pre_generated_v2_instrumental_uri || pre_generated_v1_instrumental_uri;
+    if (action === "create_stems") {
+      const { taskId, audioId } = payload;
+      const stemTaskId = await createSunoStemTask(taskId, audioId);
+      return Response.json({ success: true, stemTaskId });
+    }
 
-    const phoneInfo = extractPhone(rawPhone || "11988032049");
-    const customerPhoneStr = phoneInfo?.formatted || rawPhone || "11 98803-2049";
-    const phoneDigits = phoneInfo?.digits || "11988032049";
+    if (action === "poll_stems") {
+      const { stemTaskId } = payload;
+      if (!stemTaskId) return Response.json({ error: "stemTaskId é obrigatório" }, { status: 400 });
+      try {
+        const stems = await pollSunoStems(stemTaskId, 7000);
+        return Response.json({ status: "SUCCESS", stems });
+      } catch (err: any) {
+        const msg = String(err?.message || "");
+        if (msg.includes("Tempo limite") || msg.includes("timeout")) {
+          return Response.json({ status: "PENDING" });
+        }
+        return Response.json({ status: "ERROR", error: msg });
+      }
+    }
 
-    currentStep = "Obtenção de URLs assinados";
-    const getSignedUrl = async (uri: string) => {
-      const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
-        file_uri: uri,
-        expires_in: 3600,
-      });
-      return signed_url;
-    };
+    // ==========================================
+    // FLUXO DE PROCESSAMENTO, ALINHAMENTO E MIX
+    // ==========================================
+    console.log("[runPipeline] Iniciando alinhamento e mixagem...");
 
-    const clientSignedUrl = await getSignedUrl(client_audio_uri);
-    const clientAudioBuffer = await fetchBuffer(clientSignedUrl);
+    // 1. Obter URL assinada do áudio do cliente
+    if (!clientAudioFileUri) {
+      return Response.json({ error: "clientAudioFileUri é obrigatório" }, { status: 400 });
+    }
+    const clientSignedRes = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+      file_uri: clientAudioFileUri,
+      expires_in: 3600,
+    });
+    const clientSignedUrl = clientSignedRes.signed_url;
 
-    let organizedLyrics = "Música Autoral - Letra em Produção";
-    let musicPrompt = style_choice;
-    let stems1 = { vocalUrl: "", instrumentalUrl: "" };
-    let stems2 = { vocalUrl: "", instrumentalUrl: "" };
-    let sunoTaskId = hasDirectStems ? "direct_stems_by_user" : "";
-    let v1AudioUrl = "";
-    let v2AudioUrl = "";
-    let sunoV1Buffer = new ArrayBuffer(0);
-    let sunoV2Buffer = new ArrayBuffer(0);
+    // 2. Determinar URLs das stems (Vocal e Instrumental de V1 e V2)
+    let v1VocalUrl = "";
+    let v1InstUrl = "";
+    let v2VocalUrl = "";
+    let v2InstUrl = "";
 
     if (hasDirectStems) {
-      currentStep = "Carregamento de Stems Diretos";
-      const v1VocalSigned = await getSignedUrl(pre_generated_v1_vocal_uri);
-      const v1InstSigned = await getSignedUrl(pre_generated_v1_instrumental_uri);
-      const v2VocalSigned = await getSignedUrl(effectiveV2VocalUri);
-      const v2InstSigned = await getSignedUrl(effectiveV2InstUri);
-
-      stems1 = { vocalUrl: v1VocalSigned, instrumentalUrl: v1InstSigned };
-      stems2 = { vocalUrl: v2VocalSigned, instrumentalUrl: v2InstSigned };
-      v1AudioUrl = v1InstSigned;
-      v2AudioUrl = v2InstSigned;
-
-      sunoV1Buffer = await fetchBuffer(v1InstSigned);
-      sunoV2Buffer = await fetchBuffer(v2InstSigned);
-
-      // No modo com stems já existentes, a transcrição é opcional e pulada para evitar lentidão e timeout 504
-      organizedLyrics = "Faixa com Stems pré-existentes";
+      // Stems fornecidas diretamente pelo usuário: obter URLs assinadas em lote
+      const [s1Vocal, s1Inst, s2Vocal, s2Inst] = await Promise.all([
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: v1VocalFileUri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: v1InstFileUri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: v2VocalFileUri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: v2InstFileUri, expires_in: 3600 }),
+      ]);
+      v1VocalUrl = s1Vocal.signed_url;
+      v1InstUrl = s1Inst.signed_url;
+      v2VocalUrl = s2Vocal.signed_url;
+      v2InstUrl = s2Inst.signed_url;
+    } else if (providedStems1 && providedStems2) {
+      // Stems já geradas via Suno assíncrono
+      v1VocalUrl = providedStems1.vocalUrl;
+      v1InstUrl = providedStems1.instrumentalUrl;
+      v2VocalUrl = providedStems2.vocalUrl;
+      v2InstUrl = providedStems2.instrumentalUrl;
     } else {
-      currentStep = "Geração no Suno";
-      const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
-      organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
-      musicPrompt = await generateMusicalPrompt(base44, style_choice);
-
-      sunoTaskId = await createSunoGenerationTask({ lyrics: organizedLyrics, stylePrompt: musicPrompt });
-      const sunoResult = await pollSunoGeneration(sunoTaskId);
-      v1AudioUrl = sunoResult.version1.audioUrl;
-      v2AudioUrl = sunoResult.version2.audioUrl;
-
-      const [stemTask1Id, stemTask2Id] = await Promise.all([
-        createSunoStemTask(sunoTaskId, sunoResult.version1.audioId),
-        createSunoStemTask(sunoTaskId, sunoResult.version2.audioId),
-      ]);
-
-      [stems1, stems2] = await Promise.all([
-        pollSunoStems(stemTask1Id),
-        pollSunoStems(stemTask2Id),
-      ]);
-
-      [sunoV1Buffer, sunoV2Buffer] = await Promise.all([
-        fetchBuffer(v1AudioUrl),
-        fetchBuffer(v2AudioUrl),
-      ]);
+      return Response.json({
+        error: "Stems não fornecidas. Use o fluxo assíncrono ou forneça stems diretas.",
+      }, { status: 400 });
     }
 
-    currentStep = "Preparação da voz do cliente";
-    const clientMasteredBuffer = ensureValidWavHeader(clientAudioBuffer);
-
-    currentStep = "Sincronização e Mixagem DSP";
-    const [v1VocalRaw, v1InstRaw, v2VocalRaw, v2InstRaw] = await Promise.all([
-      fetchBuffer(stems1.vocalUrl),
-      fetchBuffer(stems1.instrumentalUrl),
-      fetchBuffer(stems2.vocalUrl),
-      fetchBuffer(stems2.instrumentalUrl),
+    // 3. Download paralelo de todos os áudios necessários
+    const [clientRaw, v1VocalRaw, v1InstRaw, v2VocalRaw, v2InstRaw] = await Promise.all([
+      fetchBuffer(clientSignedUrl),
+      fetchBuffer(v1VocalUrl),
+      fetchBuffer(v1InstUrl),
+      fetchBuffer(v2VocalUrl),
+      fetchBuffer(v2InstUrl),
     ]);
 
+    const clientBuffer = ensureValidWavHeader(clientRaw);
     const v1VocalBuffer = ensureValidWavHeader(v1VocalRaw);
     const v1InstBuffer = ensureValidWavHeader(v1InstRaw);
     const v2VocalBuffer = ensureValidWavHeader(v2VocalRaw);
     const v2InstBuffer = ensureValidWavHeader(v2InstRaw);
 
-    // Etapa de sincronização totalmente intacta:
-    const [mix1, mix2] = await Promise.all([
-      alignAndMixTrackPair(v1VocalBuffer, clientMasteredBuffer, v1InstBuffer),
-      alignAndMixTrackPair(v2VocalBuffer, clientMasteredBuffer, v2InstBuffer),
+    // 4. Processamento paralelo de DSP para Faixa 1 e Faixa 2
+    const [track1, track2] = await Promise.all([
+      alignAndMixTrackPair({
+        clientAudioBuffer: clientBuffer,
+        referenceVocalBuffer: v1VocalBuffer,
+        instrumentalBuffer: v1InstBuffer,
+      }),
+      alignAndMixTrackPair({
+        clientAudioBuffer: clientBuffer,
+        referenceVocalBuffer: v2VocalBuffer,
+        instrumentalBuffer: v2InstBuffer,
+      }),
     ]);
 
-    const previaOriginal1Bytes = create70sPreviewMp3(sunoV1Buffer);
-    const previaOriginal2Bytes = create70sPreviewMp3(sunoV2Buffer);
-
-    currentStep = "Upload dos Ficheiros Finais";
-    const uploadPrivate = async (bytes: Uint8Array | ArrayBuffer, name: string, mime: string) => {
-      const file = new File([new Blob([bytes instanceof ArrayBuffer ? bytes : bytes.buffer])], name, { type: mime });
-      const { file_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file });
-      const { signed_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri, expires_in: 86400 });
-      return { file_uri, signed_url };
-    };
-
-    // Prepara playbacks em MP3 e WAV
+    // 5. Gera playbacks em WAV e MP3 e prévias instrumentais
     const p1Audio = convertToWavAndMp3(v1InstBuffer);
     const p2Audio = convertToWavAndMp3(v2InstBuffer);
+    const previaInst1 = create70sPreviewMp3(v1InstBuffer);
+    const previaInst2 = create70sPreviewMp3(v2InstBuffer);
 
+    // 6. Upload paralelo dos arquivos finais
     const [
-      finalVoz1WavUpload, finalVoz1Mp3Upload,
-      finalVoz2WavUpload, finalVoz2Mp3Upload,
-      playback1Mp3Upload, playback1WavUpload,
-      playback2Mp3Upload, playback2WavUpload,
-      previaVoz1Upload, previaVoz2Upload,
-      previaOrig1Upload, previaOrig2Upload,
-      finalOrig1Upload, finalOrig2Upload,
+      upVoz1Wav, upVoz1Mp3,
+      upVoz2Wav, upVoz2Mp3,
+      upPlay1Mp3, upPlay1Wav,
+      upPlay2Mp3, upPlay2Wav,
+      upPreviaVoz1, upPreviaVoz2,
+      upPreviaInst1, upPreviaInst2,
     ] = await Promise.all([
-      uploadPrivate(mix1.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, "audio/wav"),
-      uploadPrivate(mix1.fullMp3Bytes || mix1.previewMp3Bytes, `${customerPhoneStr} - FINAL COM VOZ 01.mp3`, "audio/mpeg"),
-      uploadPrivate(mix2.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, "audio/wav"),
-      uploadPrivate(mix2.fullMp3Bytes || mix2.previewMp3Bytes, `${customerPhoneStr} - FINAL COM VOZ 02.mp3`, "audio/mpeg"),
-      uploadPrivate(p1Audio.mp3Bytes, `${customerPhoneStr} - PLAYBACK 01.mp3`, "audio/mpeg"),
-      uploadPrivate(p1Audio.wavBytes, `${customerPhoneStr} - PLAYBACK 01.wav`, "audio/wav"),
-      uploadPrivate(p2Audio.mp3Bytes, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
-      uploadPrivate(p2Audio.wavBytes, `${customerPhoneStr} - PLAYBACK 02.wav`, "audio/wav"),
-      uploadPrivate(mix1.previewMp3Bytes, `${customerPhoneStr} - PREVIA FINAL COM VOZ 01.mp3`, "audio/mpeg"),
-      uploadPrivate(mix2.previewMp3Bytes, `${customerPhoneStr} - PREVIA FINAL COM VOZ 02.mp3`, "audio/mpeg"),
-      uploadPrivate(previaOriginal1Bytes, `${customerPhoneStr} - PREVIA 01.mp3`, "audio/mpeg"),
-      uploadPrivate(previaOriginal2Bytes, `${customerPhoneStr} - PREVIA 02.mp3`, "audio/mpeg"),
-      uploadPrivate(sunoV1Buffer, `${customerPhoneStr} - FINAL 01.mp3`, "audio/mpeg"),
-      uploadPrivate(sunoV2Buffer, `${customerPhoneStr} - FINAL 02.mp3`, "audio/mpeg"),
+      uploadAudioFile(track1.finalWav, "final_com_voz_01.wav", "audio/wav"),
+      uploadAudioFile(track1.finalMp3, "final_com_voz_01.mp3", "audio/mpeg"),
+      uploadAudioFile(track2.finalWav, "final_com_voz_02.wav", "audio/wav"),
+      uploadAudioFile(track2.finalMp3, "final_com_voz_02.mp3", "audio/mpeg"),
+      uploadAudioFile(p1Audio.mp3, "playback_01.mp3", "audio/mpeg"),
+      uploadAudioFile(p1Audio.wav, "playback_01.wav", "audio/wav"),
+      uploadAudioFile(p2Audio.mp3, "playback_02.mp3", "audio/mpeg"),
+      uploadAudioFile(p2Audio.wav, "playback_02.wav", "audio/wav"),
+      uploadAudioFile(track1.previewMp3, "previa_voz_01.mp3", "audio/mpeg"),
+      uploadAudioFile(track2.previewMp3, "previa_voz_02.mp3", "audio/mpeg"),
+      uploadAudioFile(previaInst1, "previa_playback_01.mp3", "audio/mpeg"),
+      uploadAudioFile(previaInst2, "previa_playback_02.mp3", "audio/mpeg"),
     ]);
 
-    // SALVAMENTO NO GOOGLE DRIVE (com try/catch não-bloqueante)
-    let driveStatus = { saved: true, message: "Arquivos salvos no Google Drive." };
+    // 7. Chamada ao Google Drive com isolamento de erro (não-bloqueante contra 504)
+    let driveWarning: string | null = null;
+    let driveSaved = false;
+
     try {
-      const driveKey = secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON") || secrets.get("GOOGLE_DRIVE_SERVICE_KEY");
-      if (driveKey) {
-        currentStep = "Salvando no Google Drive";
-        const driveRes = await base44.asServiceRole.functions.saveToDrive({
-          job_id: jobId,
-          phone: customerPhoneStr,
-          urls: {
-            final_orig_1: finalOrig1Upload.signed_url,
-            final_orig_2: finalOrig2Upload.signed_url,
-            final_voz_1: finalVoz1WavUpload.signed_url,
-            final_voz_2: finalVoz2WavUpload.signed_url,
-          },
-        });
-        if (driveRes && driveRes.success === false) {
-          driveStatus = { saved: false, message: driveRes.error || "Aviso: Não foi possível salvar no Google Drive." };
-        }
-      } else {
-        driveStatus = { saved: false, message: "Google Drive não configurado nos secrets (GOOGLE_SERVICE_ACCOUNT_JSON)." };
-      }
+      const drivePromise = base44.asServiceRole.functions.invoke("saveToDrive", {
+        job_id: jobId || `job_${Date.now()}`,
+        phone: phone || "",
+        urls: {
+          finalVoz1Wav: upVoz1Wav.signedUrl,
+          finalVoz1Mp3: upVoz1Mp3.signedUrl,
+          finalVoz2Wav: upVoz2Wav.signedUrl,
+          finalVoz2Mp3: upVoz2Mp3.signedUrl,
+          playback1Mp3: upPlay1Mp3.signedUrl,
+          playback1Wav: upPlay1Wav.signedUrl,
+          playback2Mp3: upPlay2Mp3.signedUrl,
+          playback2Wav: upPlay2Wav.signedUrl,
+        },
+      });
+
+      // Aguarda até 4 segundos no máximo; se o Drive demorar, não derruba a resposta com 504
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Drive timeout tolerado")), 4000)
+      );
+      await Promise.race([drivePromise, timeoutPromise]);
+      driveSaved = true;
     } catch (driveErr: any) {
-      console.warn("[Google Drive Warning]: Erro ao salvar no Drive:", driveErr.message);
-      // O fluxo NÃO para: apenas reporta o aviso no retorno
-      driveStatus = { saved: false, message: `Falha ao salvar no Drive: ${driveErr.message}` };
-    }
-
-    const completedData = {
-      status: "completed",
-      phone: customerPhoneStr,
-      phone_digits: phoneDigits,
-      lyrics: organizedLyrics,
-      style_prompt: musicPrompt,
-      suno_task_id: sunoTaskId,
-      suno_v1_audio_url: v1AudioUrl,
-      suno_v2_audio_url: v2AudioUrl,
-      final_v1_uri: finalOrig1Upload.file_uri,
-      final_v2_uri: finalOrig2Upload.file_uri,
-      final_voz_v1_uri: finalVoz1WavUpload.file_uri,
-      final_voz_v2_uri: finalVoz2WavUpload.file_uri,
-      preview_v1_uri: previaOrig1Upload.file_uri,
-      preview_v2_uri: previaOrig2Upload.file_uri,
-      preview_voz_v1_uri: previaVoz1Upload.file_uri,
-      preview_voz_v2_uri: previaVoz2Upload.file_uri,
-      drive_saved: driveStatus.saved,
-      drive_message: driveStatus.message,
-    };
-
-    if (jobId) {
-      try { await base44.asServiceRole.entities.ProcessingJob.update(jobId, completedData); } catch {}
+      console.warn("[runPipeline] Google Drive não concluiu a tempo:", driveErr?.message);
+      driveWarning = "Os arquivos estão disponíveis para download imediato, mas o backup automático no Google Drive está pendente.";
     }
 
     return Response.json({
       success: true,
-      job: completedData,
-      drive_status: driveStatus,
       downloads: {
-        final_voz_1: finalVoz1WavUpload.signed_url,
-        final_voz_1_mp3: finalVoz1Mp3Upload.signed_url,
-        final_voz_2: finalVoz2WavUpload.signed_url,
-        final_voz_2_mp3: finalVoz2Mp3Upload.signed_url,
-        playback_1: playback1Mp3Upload.signed_url,
-        playback_1_wav: playback1WavUpload.signed_url,
-        playback_2: playback2Mp3Upload.signed_url,
-        playback_2_wav: playback2WavUpload.signed_url,
-        final_orig_1: finalOrig1Upload.signed_url,
-        final_orig_2: finalOrig2Upload.signed_url,
-        previa_1: previaOrig1Upload.signed_url,
-        previa_2: previaOrig2Upload.signed_url,
-        previa_voz_1: previaVoz1Upload.signed_url,
-        previa_voz_2: previaVoz2Upload.signed_url,
-      }
+        finalVoz1Wav: upVoz1Wav.signedUrl,
+        finalVoz1Mp3: upVoz1Mp3.signedUrl,
+        finalVoz2Wav: upVoz2Wav.signedUrl,
+        finalVoz2Mp3: upVoz2Mp3.signedUrl,
+        playback1Mp3: upPlay1Mp3.signedUrl,
+        playback1Wav: upPlay1Wav.signedUrl,
+        playback2Mp3: upPlay2Mp3.signedUrl,
+        playback2Wav: upPlay2Wav.signedUrl,
+        previaVoz1: upPreviaVoz1.signedUrl,
+        previaVoz2: upPreviaVoz2.signedUrl,
+        previaPlayback1: upPreviaInst1.signedUrl,
+        previaPlayback2: upPreviaInst2.signedUrl,
+      },
+      driveSaved,
+      driveWarning,
     });
-  } catch (err: any) {
-    console.error(`[runPipeline CRITICAL ERROR at step '${currentStep}']:`, err);
-    if (jobId && base44) {
-      try { 
-        await base44.asServiceRole.entities.ProcessingJob.update(jobId, { 
-          status: "failed", 
-          error_message: `${currentStep}: ${err.message || "Erro desconhecido"}` 
-        }); 
-      } catch {}
-    }
-    return Response.json({ 
-      success: false, 
-      error: `Erro [${currentStep}]: ${err.message || "Erro interno no servidor"}`,
-      step: currentStep,
-      stack: err.stack || ""
-    }, { status: 200 });
+  } catch (error: any) {
+    console.error("[runPipeline] Erro:", error);
+    return Response.json({ error: error?.message || "Erro interno no processamento" }, { status: 500 });
   }
 });

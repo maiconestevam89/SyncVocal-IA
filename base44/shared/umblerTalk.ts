@@ -215,3 +215,85 @@ export async function sendUmblerMediaFile({
   try { data = await res.json(); } catch { data = await res.text(); }
   return { ok: res.ok, status: res.status, data };
 }
+
+export async function sendUmblerTemplateMessage({
+  apiToken,
+  orgId,
+  channelPhone,
+  customerPhone,
+  templateNameOrId,
+  params,
+}: {
+  apiToken: string;
+  orgId: string;
+  channelPhone: string;
+  customerPhone: string;
+  templateNameOrId: string;
+  params: string[];
+}) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
+  let targetTemplateId = templateNameOrId;
+
+  // Se for o nome do template (ex: "cobrana_pix_qr"), busca o ID correspondente na organização
+  try {
+    const listUrl = `${UTALK_BASE}/v1/templates/?organizationId=${encodeURIComponent(orgId)}&queryString=${encodeURIComponent(templateNameOrId)}`;
+    const res = await fetch(listUrl, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${apiToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const items = data?.items || (Array.isArray(data) ? data : []);
+      const matched = items.find((t: any) => 
+        t.label === templateNameOrId || 
+        t.id === templateNameOrId || 
+        t.label?.toLowerCase() === templateNameOrId.toLowerCase()
+      );
+      if (matched?.id) {
+        targetTemplateId = matched.id;
+      }
+    }
+  } catch (lookupErr) {
+    console.warn("[Umbler Template Lookup Warning]:", lookupErr);
+  }
+
+  try {
+    const res = await fetch(`${UTALK_BASE}/v1/template-messages/simplified/`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        toPhone: to,
+        fromPhone: from,
+        organizationId: orgId,
+        templateId: targetTemplateId,
+        params,
+        skipReassign: false,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    let resData: any = null;
+    try { resData = await res.json(); } catch { resData = await res.text(); }
+
+    return {
+      ok: res.ok,
+      status: res.status,
+      data: resData,
+      templateIdUsed: targetTemplateId,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      error: err?.message || String(err),
+      templateIdUsed: targetTemplateId,
+    };
+  }
+}
+
