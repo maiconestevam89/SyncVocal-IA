@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { decodeWavMonoAtRate, encodeWav } from "../../shared/wavCodec.ts";
+import { decodeAudioMono } from "../../shared/audioProcessor.ts";
 import { encodeMp3 } from "../../shared/mp3Encoder.ts";
 import {
   computeFeatures,
@@ -18,9 +19,9 @@ import {
 // and 70-second previews in private storage for the async production workflow.
 //
 // Memory strategy:
-// - Decode directly to mono at 22050 Hz (via decodeWavMonoAtRate), avoiding
-//   the ~104 MB per-file Float32Array that a full-rate stereo decode would
-//   produce. Each decoded file is ~26 MB instead.
+// - Decode WAV files directly to mono at 22050 Hz, avoiding the ~104 MB
+//   full-rate stereo Float32Array. For compressed formats, fall back to the
+//   existing multi-format decoder before entering the DSP pipeline.
 // - Load and free each file incrementally — never hold all three at once.
 // - Process vocals as mono; the instrumental is also mono (averaged during
 //   decode). The final WAV is mono at 22050 Hz, which is fine for WhatsApp.
@@ -46,6 +47,16 @@ async function fetchArrayBuffer(url) {
   const buf = await res.arrayBuffer();
   // Ensure we return a proper ArrayBuffer (Deno can return Uint8Array in some cases)
   return buf instanceof ArrayBuffer ? buf : new Uint8Array(buf).buffer;
+}
+
+// Keep the memory-efficient WAV path, but accept MP3/WebM/OGG/M4A through the existing multi-format decoder.
+async function decodeAudioAtRate(url: string) {
+  const audioBuffer = await fetchArrayBuffer(url);
+  try {
+    return decodeWavMonoAtRate(audioBuffer, PROCESS_RATE);
+  } catch {
+    return await decodeAudioMono(audioBuffer, PROCESS_RATE);
+  }
 }
 
 // Linear-interpolation resample between arbitrary sample rates (mono).
@@ -90,7 +101,7 @@ export default async function(req) {
       ]);
 
       // ── STEP 1: Load vocal1 (reference) → extract features + silence gate → free ──
-      const vocal1 = decodeWavMonoAtRate(await fetchArrayBuffer(v1Url), PROCESS_RATE);
+      const vocal1 = await decodeAudioAtRate(v1Url);
       const refDur = vocal1.channels[0].length / vocal1.sampleRate;
       const hop = Math.max(0.04, refDur / 5000);
 
@@ -105,7 +116,7 @@ export default async function(req) {
       refMono.fill(0);
 
       // ── STEP 2: Load vocal2 (client) → align to reference → free ──
-      const vocal2 = decodeWavMonoAtRate(await fetchArrayBuffer(v2Url), PROCESS_RATE);
+      const vocal2 = await decodeAudioAtRate(v2Url);
       const vocalDur = vocal2.channels[0].length / vocal2.sampleRate;
       const vocalHop = Math.max(0.04, Math.max(refDur, vocalDur) / 5000);
 
@@ -141,7 +152,7 @@ export default async function(req) {
       vocalMono.fill(0);
 
       // ── STEP 3: Load instrumental → gate → mix → free ──
-      const instrumental = decodeWavMonoAtRate(await fetchArrayBuffer(instUrl), PROCESS_RATE);
+      const instrumental = await decodeAudioAtRate(instUrl);
 
       // Resample aligned to instrumental's sample rate (same rate, so no-op)
       const alignedResampled = resampleMono(aligned, vocal2.sampleRate, instrumental.sampleRate);
