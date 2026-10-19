@@ -137,7 +137,7 @@ export async function alignAndMixTrackPair(
   refVocalBuffer: ArrayBuffer,
   clientVocalBuffer: ArrayBuffer,
   instrumentalBuffer: ArrayBuffer
-): Promise<{ fullWavBytes: Uint8Array; previewMp3Bytes: Uint8Array }> {
+): Promise<{ fullWavBytes: Uint8Array; fullMp3Bytes: Uint8Array; previewMp3Bytes: Uint8Array }> {
   // 1. Carrega vocal de referência
   const vocal1 = decodeWavMonoAtRate(refVocalBuffer, PROCESS_RATE);
   const refDur = vocal1.channels[0].length / vocal1.sampleRate;
@@ -204,13 +204,16 @@ export async function alignAndMixTrackPair(
   // 4. Codifica WAV completo
   const wavBytes = encodeWav([mixed], instrumental.sampleRate);
 
-  // 5. Codifica prévia de 70 segundos (1:10)
+  // 5. Codifica MP3 completo
+  const fullMp3Bytes = encodeMp3([mixed], instrumental.sampleRate, 192);
+
+  // 6. Codifica prévia de 70 segundos (1:10)
   const previewSeconds = 70;
   const previewLen = Math.min(mixed.length, Math.floor(previewSeconds * instrumental.sampleRate));
   const previewChannels = [mixed.subarray(0, previewLen)];
   const previewMp3Bytes = encodeMp3(previewChannels, instrumental.sampleRate, 192);
 
-  return { fullWavBytes: wavBytes, previewMp3Bytes };
+  return { fullWavBytes: wavBytes, fullMp3Bytes, previewMp3Bytes };
 }
 
 /**
@@ -222,4 +225,19 @@ export function create70sPreviewMp3(audioBuffer: ArrayBuffer): Uint8Array {
   const previewLen = Math.min(decoded.channels[0].length, Math.floor(previewSeconds * decoded.sampleRate));
   const previewChannels = [decoded.channels[0].subarray(0, previewLen)];
   return encodeMp3(previewChannels, decoded.sampleRate, 192);
+}
+
+/**
+ * Converte um buffer de áudio em cópias codificadas em WAV e MP3
+ */
+export function convertToWavAndMp3(audioBuffer: ArrayBuffer): { wavBytes: Uint8Array; mp3Bytes: Uint8Array } {
+  try {
+    const decoded = decodeWavMonoAtRate(audioBuffer, PROCESS_RATE);
+    const wavBytes = encodeWav(decoded.channels, decoded.sampleRate);
+    const mp3Bytes = encodeMp3(decoded.channels, decoded.sampleRate, 192);
+    return { wavBytes, mp3Bytes };
+  } catch {
+    const raw = new Uint8Array(audioBuffer);
+    return { wavBytes: raw, mp3Bytes: raw };
+  }
 }
