@@ -13,7 +13,7 @@ import {
 } from '../../shared/suno.ts';
 import { transcribeAudioUrl } from '../../shared/transcription.ts';
 import { organizeLyricsWithLLM, generateMusicalPrompt } from '../../shared/organizeLyrics.ts';
-import { alignAndMixTrackPair, create70sPreviewMp3 } from '../../shared/audioProcessor.ts';
+import { alignAndMixTrackPair, create70sPreviewMp3, convertToWavAndMp3 } from '../../shared/audioProcessor.ts';
 import { extractPhone } from '../../shared/umblerTalk.ts';
 
 // Injeta um cabeçalho RIFF WAV válido garantindo compatibilidade total com o DSP sem falhas
@@ -145,12 +145,8 @@ Deno.serve(async (req: Request) => {
       sunoV1Buffer = await fetchBuffer(v1InstSigned);
       sunoV2Buffer = await fetchBuffer(v2InstSigned);
 
-      try {
-        const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
-        organizedLyrics = await organizeLyricsWithLLM(base44, rawTranscript);
-      } catch (err: any) {
-        console.warn("[transcribe] aviso:", err.message);
-      }
+      // No modo com stems já existentes, a transcrição é opcional e pulada para evitar lentidão e timeout 504
+      organizedLyrics = "Faixa com Stems pré-existentes";
     } else {
       currentStep = "Geração no Suno";
       const rawTranscript = await transcribeAudioUrl(clientSignedUrl);
@@ -211,24 +207,62 @@ Deno.serve(async (req: Request) => {
       return { file_uri, signed_url };
     };
 
+    // Prepara playbacks em MP3 e WAV
+    const p1Audio = convertToWavAndMp3(v1InstBuffer);
+    const p2Audio = convertToWavAndMp3(v2InstBuffer);
+
     const [
-      finalVoz1Upload, finalVoz2Upload,
+      finalVoz1WavUpload, finalVoz1Mp3Upload,
+      finalVoz2WavUpload, finalVoz2Mp3Upload,
+      playback1Mp3Upload, playback1WavUpload,
+      playback2Mp3Upload, playback2WavUpload,
       previaVoz1Upload, previaVoz2Upload,
       previaOrig1Upload, previaOrig2Upload,
       finalOrig1Upload, finalOrig2Upload,
-      playback1Upload, playback2Upload,
     ] = await Promise.all([
       uploadPrivate(mix1.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 01.wav`, "audio/wav"),
+      uploadPrivate(mix1.fullMp3Bytes || mix1.previewMp3Bytes, `${customerPhoneStr} - FINAL COM VOZ 01.mp3`, "audio/mpeg"),
       uploadPrivate(mix2.fullWavBytes, `${customerPhoneStr} - FINAL COM VOZ 02.wav`, "audio/wav"),
+      uploadPrivate(mix2.fullMp3Bytes || mix2.previewMp3Bytes, `${customerPhoneStr} - FINAL COM VOZ 02.mp3`, "audio/mpeg"),
+      uploadPrivate(p1Audio.mp3Bytes, `${customerPhoneStr} - PLAYBACK 01.mp3`, "audio/mpeg"),
+      uploadPrivate(p1Audio.wavBytes, `${customerPhoneStr} - PLAYBACK 01.wav`, "audio/wav"),
+      uploadPrivate(p2Audio.mp3Bytes, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
+      uploadPrivate(p2Audio.wavBytes, `${customerPhoneStr} - PLAYBACK 02.wav`, "audio/wav"),
       uploadPrivate(mix1.previewMp3Bytes, `${customerPhoneStr} - PREVIA FINAL COM VOZ 01.mp3`, "audio/mpeg"),
       uploadPrivate(mix2.previewMp3Bytes, `${customerPhoneStr} - PREVIA FINAL COM VOZ 02.mp3`, "audio/mpeg"),
       uploadPrivate(previaOriginal1Bytes, `${customerPhoneStr} - PREVIA 01.mp3`, "audio/mpeg"),
       uploadPrivate(previaOriginal2Bytes, `${customerPhoneStr} - PREVIA 02.mp3`, "audio/mpeg"),
       uploadPrivate(sunoV1Buffer, `${customerPhoneStr} - FINAL 01.mp3`, "audio/mpeg"),
       uploadPrivate(sunoV2Buffer, `${customerPhoneStr} - FINAL 02.mp3`, "audio/mpeg"),
-      uploadPrivate(v1InstBuffer, `${customerPhoneStr} - PLAYBACK 01.mp3`, "audio/mpeg"),
-      uploadPrivate(v2InstBuffer, `${customerPhoneStr} - PLAYBACK 02.mp3`, "audio/mpeg"),
     ]);
+
+    // SALVAMENTO NO GOOGLE DRIVE (com try/catch não-bloqueante)
+    let driveStatus = { saved: true, message: "Arquivos salvos no Google Drive." };
+    try {
+      const driveKey = secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON") || secrets.get("GOOGLE_DRIVE_SERVICE_KEY");
+      if (driveKey) {
+        currentStep = "Salvando no Google Drive";
+        const driveRes = await base44.asServiceRole.functions.saveToDrive({
+          job_id: jobId,
+          phone: customerPhoneStr,
+          urls: {
+            final_orig_1: finalOrig1Upload.signed_url,
+            final_orig_2: finalOrig2Upload.signed_url,
+            final_voz_1: finalVoz1WavUpload.signed_url,
+            final_voz_2: finalVoz2WavUpload.signed_url,
+          },
+        });
+        if (driveRes && driveRes.success === false) {
+          driveStatus = { saved: false, message: driveRes.error || "Aviso: Não foi possível salvar no Google Drive." };
+        }
+      } else {
+        driveStatus = { saved: false, message: "Google Drive não configurado nos secrets (GOOGLE_SERVICE_ACCOUNT_JSON)." };
+      }
+    } catch (driveErr: any) {
+      console.warn("[Google Drive Warning]: Erro ao salvar no Drive:", driveErr.message);
+      // O fluxo NÃO para: apenas reporta o aviso no retorno
+      driveStatus = { saved: false, message: `Falha ao salvar no Drive: ${driveErr.message}` };
+    }
 
     const completedData = {
       status: "completed",
@@ -241,12 +275,14 @@ Deno.serve(async (req: Request) => {
       suno_v2_audio_url: v2AudioUrl,
       final_v1_uri: finalOrig1Upload.file_uri,
       final_v2_uri: finalOrig2Upload.file_uri,
-      final_voz_v1_uri: finalVoz1Upload.file_uri,
-      final_voz_v2_uri: finalVoz2Upload.file_uri,
+      final_voz_v1_uri: finalVoz1WavUpload.file_uri,
+      final_voz_v2_uri: finalVoz2WavUpload.file_uri,
       preview_v1_uri: previaOrig1Upload.file_uri,
       preview_v2_uri: previaOrig2Upload.file_uri,
       preview_voz_v1_uri: previaVoz1Upload.file_uri,
       preview_voz_v2_uri: previaVoz2Upload.file_uri,
+      drive_saved: driveStatus.saved,
+      drive_message: driveStatus.message,
     };
 
     if (jobId) {
@@ -256,13 +292,18 @@ Deno.serve(async (req: Request) => {
     return Response.json({
       success: true,
       job: completedData,
+      drive_status: driveStatus,
       downloads: {
+        final_voz_1: finalVoz1WavUpload.signed_url,
+        final_voz_1_mp3: finalVoz1Mp3Upload.signed_url,
+        final_voz_2: finalVoz2WavUpload.signed_url,
+        final_voz_2_mp3: finalVoz2Mp3Upload.signed_url,
+        playback_1: playback1Mp3Upload.signed_url,
+        playback_1_wav: playback1WavUpload.signed_url,
+        playback_2: playback2Mp3Upload.signed_url,
+        playback_2_wav: playback2WavUpload.signed_url,
         final_orig_1: finalOrig1Upload.signed_url,
         final_orig_2: finalOrig2Upload.signed_url,
-        playback_1: playback1Upload.signed_url,
-        playback_2: playback2Upload.signed_url,
-        final_voz_1: finalVoz1Upload.signed_url,
-        final_voz_2: finalVoz2Upload.signed_url,
         previa_1: previaOrig1Upload.signed_url,
         previa_2: previaOrig2Upload.signed_url,
         previa_voz_1: previaVoz1Upload.signed_url,
