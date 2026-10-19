@@ -326,18 +326,23 @@ export default function Landing() {
         // Polling do Suno
         let sunoData = null;
         let attempts = 0;
-        while (!sunoData && attempts < 40) {
+        while (!sunoData && attempts < 60) {
           attempts++;
           await new Promise((r) => setTimeout(r, 4000));
           setPipelineMessage(`Passo 1/3: Aguardando arranjo musical do Suno (${attempts * 4}s)...`);
-          const pollRes = await base44.functions.invoke("runPipeline", {
-            action: "poll_suno",
-            taskId,
-          });
-          if (pollRes.data?.status === "SUCCESS") {
-            sunoData = pollRes.data.result;
-          } else if (pollRes.data?.status === "ERROR") {
-            throw new Error(pollRes.data.error || "Erro na geração do Suno.");
+          try {
+            const pollRes = await base44.functions.invoke("runPipeline", {
+              action: "poll_suno",
+              taskId,
+            });
+            if (pollRes.data?.status === "SUCCESS") {
+              sunoData = pollRes.data.result;
+            } else if (pollRes.data?.status === "ERROR") {
+              throw new Error(pollRes.data.error || "Erro na geração do Suno.");
+            }
+          } catch (pollError) {
+            // Um 504 ou erro de rede isolado não deve cancelar a geração.
+            console.warn("Falha temporária ao consultar o Suno; tentando novamente.", pollError?.message || pollError);
           }
         }
 
@@ -364,17 +369,27 @@ export default function Landing() {
         let stems1 = null;
         let stems2 = null;
         attempts = 0;
-        while ((!stems1 || !stems2) && attempts < 30) {
+        while ((!stems1 || !stems2) && attempts < 45) {
           attempts++;
           await new Promise((r) => setTimeout(r, 4000));
           setPipelineMessage(`Passo 2/3: Extraindo faixas isoladas (${attempts * 4}s)...`);
           if (!stems1) {
-            const p1 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id1 });
-            if (p1.data?.status === "SUCCESS") stems1 = p1.data.stems;
+            try {
+              const p1 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id1 });
+              if (p1.data?.status === "SUCCESS") stems1 = p1.data.stems;
+              else if (p1.data?.status === "ERROR") throw new Error(p1.data.error || "Erro na separação dos stems.");
+            } catch (pollError) {
+              console.warn("Falha temporária ao consultar os stems da versão 1; tentando novamente.", pollError?.message || pollError);
+            }
           }
           if (!stems2) {
-            const p2 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id2 });
-            if (p2.data?.status === "SUCCESS") stems2 = p2.data.stems;
+            try {
+              const p2 = await base44.functions.invoke("runPipeline", { action: "poll_stems", stemTaskId: id2 });
+              if (p2.data?.status === "SUCCESS") stems2 = p2.data.stems;
+              else if (p2.data?.status === "ERROR") throw new Error(p2.data.error || "Erro na separação dos stems.");
+            } catch (pollError) {
+              console.warn("Falha temporária ao consultar os stems da versão 2; tentando novamente.", pollError?.message || pollError);
+            }
           }
         }
 

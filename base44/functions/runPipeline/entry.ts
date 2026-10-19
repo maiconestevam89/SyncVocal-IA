@@ -71,11 +71,11 @@ Deno.serve(async (req: Request) => {
         const result = await pollSunoGeneration(taskId, 7000);
         return Response.json({ status: "SUCCESS", result });
       } catch (err: any) {
-        const msg = String(err?.message || "");
-        if (msg.includes("Tempo limite") || msg.includes("timeout")) {
+        const msg = String(err?.message || "").toLowerCase();
+        if (msg.includes("tempo limite") || msg.includes("timeout") || msg.includes("abort")) {
           return Response.json({ status: "PENDING" });
         }
-        return Response.json({ status: "ERROR", error: msg });
+        return Response.json({ status: "ERROR", error: err?.message || msg });
       }
     }
 
@@ -92,11 +92,11 @@ Deno.serve(async (req: Request) => {
         const stems = await pollSunoStems(stemTaskId, 7000);
         return Response.json({ status: "SUCCESS", stems });
       } catch (err: any) {
-        const msg = String(err?.message || "");
-        if (msg.includes("Tempo limite") || msg.includes("timeout")) {
+        const msg = String(err?.message || "").toLowerCase();
+        if (msg.includes("tempo limite") || msg.includes("timeout") || msg.includes("abort")) {
           return Response.json({ status: "PENDING" });
         }
-        return Response.json({ status: "ERROR", error: msg });
+        return Response.json({ status: "ERROR", error: err?.message || msg });
       }
     }
 
