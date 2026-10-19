@@ -50,7 +50,8 @@ export default function Landing() {
   const [v2InstFile, setV2InstFile] = useState(null);
   const [v2InstUri, setV2InstUri] = useState(null);
 
-  const [uploadingPreGen, setUploadingPreGen] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState({});
+  const isUploadingFiles = uploadingClientAudio || Object.values(uploadingFiles).some(Boolean);
 
   const [flowStage, setFlowStage] = useState("initial");
   const [copyrightData, setCopyrightData] = useState(null);
@@ -112,17 +113,20 @@ export default function Landing() {
     setClientAudioUri(null);
   };
 
-  const handleUploadFile = async (file, setUriFn) => {
+  const handleUploadFile = async (slotKey, file, setUriFn) => {
     if (!file) return;
-    setUploadingPreGen(true);
+    setFormError("");
+    setUploadingFiles((prev) => ({ ...prev, [slotKey]: true }));
     try {
       const { file_uri } = await base44.integrations.Core.UploadPrivateFile({ file });
       setUriFn(file_uri);
+      return file_uri;
     } catch (err) {
-      console.error("Erro no upload:", err);
-      setFormError("Falha ao enviar arquivo.");
+      console.error(`Erro no upload (${slotKey}):`, err);
+      setFormError("Falha ao enviar arquivo. Tente novamente.");
+      return null;
     } finally {
-      setUploadingPreGen(false);
+      setUploadingFiles((prev) => ({ ...prev, [slotKey]: false }));
     }
   };
 
@@ -184,8 +188,8 @@ export default function Landing() {
     }
 
     if (arrangementMode === "pre_generated") {
-      if (!v1VocalUri || !v1InstUri) {
-        setFormError("Por favor, envie pelo menos o Vocal e o Playback da Versão 01.");
+      if ((!v1VocalFile && !v1VocalUri) || (!v1InstFile && !v1InstUri)) {
+        setFormError("Por favor, selecione pelo menos o Vocal e o Playback da Versão 01.");
         return;
       }
     }
@@ -203,6 +207,40 @@ export default function Landing() {
         return;
       }
       setUploadingClientAudio(false);
+    }
+
+    let activeV1VocalUri = v1VocalUri;
+    let activeV1InstUri = v1InstUri;
+    let activeV2VocalUri = v2VocalUri;
+    let activeV2InstUri = v2InstUri;
+
+    if (arrangementMode === "pre_generated") {
+      try {
+        if (!activeV1VocalUri && v1VocalFile) {
+          const res = await base44.integrations.Core.UploadPrivateFile({ file: v1VocalFile });
+          activeV1VocalUri = res.file_uri;
+          setV1VocalUri(res.file_uri);
+        }
+        if (!activeV1InstUri && v1InstFile) {
+          const res = await base44.integrations.Core.UploadPrivateFile({ file: v1InstFile });
+          activeV1InstUri = res.file_uri;
+          setV1InstUri(res.file_uri);
+        }
+        if (!activeV2VocalUri && v2VocalFile) {
+          const res = await base44.integrations.Core.UploadPrivateFile({ file: v2VocalFile });
+          activeV2VocalUri = res.file_uri;
+          setV2VocalUri(res.file_uri);
+        }
+        if (!activeV2InstUri && v2InstFile) {
+          const res = await base44.integrations.Core.UploadPrivateFile({ file: v2InstFile });
+          activeV2InstUri = res.file_uri;
+          setV2InstUri(res.file_uri);
+        }
+      } catch (err) {
+        console.error("Erro ao subir arquivos de áudio selecionados:", err);
+        setFormError("Falha ao salvar arquivos de áudio selecionados. Tente novamente.");
+        return;
+      }
     }
 
     if (arrangementMode === "generate_suno") {
@@ -225,7 +263,12 @@ export default function Landing() {
       }
     }
 
-    executePipeline(activeClientUri);
+    executePipeline(activeClientUri, {
+      v1VocalUri: activeV1VocalUri,
+      v1InstUri: activeV1InstUri,
+      v2VocalUri: activeV2VocalUri,
+      v2InstUri: activeV2InstUri,
+    });
   };
 
   const finishAsyncMix = async (startResponse) => {
@@ -280,10 +323,15 @@ export default function Landing() {
     setFlowStage("ready");
   };
 
-  const executePipeline = async (clientUri) => {
+  const executePipeline = async (clientUri, preGenUris = {}) => {
     setFlowStage("processing");
     const isPreGen = arrangementMode === "pre_generated";
     const styleToUse = customStyle.trim() || selectedStyle;
+
+    const chosenV1Vocal = preGenUris.v1VocalUri || v1VocalUri;
+    const chosenV1Inst = preGenUris.v1InstUri || v1InstUri;
+    const chosenV2Vocal = preGenUris.v2VocalUri || v2VocalUri || chosenV1Vocal;
+    const chosenV2Inst = preGenUris.v2InstUri || v2InstUri || chosenV1Inst;
 
     try {
       if (isPreGen) {
@@ -296,18 +344,21 @@ export default function Landing() {
           phone,
           customer_name: customerName,
           hasDirectStems: true,
-          pre_generated_v1_vocal_uri: v1VocalUri,
-          v1VocalFileUri: v1VocalUri,
-          pre_generated_v1_instrumental_uri: v1InstUri,
-          v1InstFileUri: v1InstUri,
-          pre_generated_v2_vocal_uri: v2VocalUri || v1VocalUri,
-          v2VocalFileUri: v2VocalUri || v1VocalUri,
-          pre_generated_v2_instrumental_uri: v2InstUri || v1InstUri,
-          v2InstFileUri: v2InstUri || v1InstUri,
+          pre_generated_v1_vocal_uri: chosenV1Vocal,
+          v1VocalFileUri: chosenV1Vocal,
+          pre_generated_v1_instrumental_uri: chosenV1Inst,
+          v1InstFileUri: chosenV1Inst,
+          pre_generated_v2_vocal_uri: chosenV2Vocal,
+          v2VocalFileUri: chosenV2Vocal,
+          pre_generated_v2_instrumental_uri: chosenV2Inst,
+          v2InstFileUri: chosenV2Inst,
         };
 
         console.log("Disparando runPipeline (Stems diretos):", payload);
         const res = await base44.functions.invoke("runPipeline", payload);
+        if (res.data?.error || res.data?.success === false) {
+          throw new Error(res.data?.error || "Erro no processamento da mixagem.");
+        }
         await finishAsyncMix(res);
       } else {
         // FLUXO SUNO IA: Ciclo modular assíncrono para eliminar 504 por timeout
@@ -410,7 +461,15 @@ export default function Landing() {
       }
     } catch (err) {
       console.error("Erro capturado no executePipeline:", err);
-      setFormError(`Erro no processamento: ${err.message || err}`);
+      const backendError =
+        err?.response?.data?.details ||
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.data?.error ||
+        err.message ||
+        err;
+      setFormError(`Erro no processamento: ${backendError}`);
+      setDetailedError(err);
       setFlowStage("initial");
     }
   };
@@ -720,13 +779,23 @@ export default function Landing() {
                               <span className="text-xs text-slate-300">Selecionar Vocal 1</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) { setV1VocalFile(f); handleUploadFile(f, setV1VocalUri); }
+                                if (f) { setV1VocalFile(f); setV1VocalUri(null); handleUploadFile("v1Vocal", f, setV1VocalUri); }
                               }} />
                             </label>
+                          ) : uploadingFiles["v1Vocal"] || !v1VocalUri ? (
+                            <div className="text-xs text-amber-300 mt-1 flex items-center justify-between bg-slate-900 border border-amber-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                                Enviando {v1VocalFile.name}...
+                              </span>
+                            </div>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
-                              <span>✓ {v1VocalFile.name}</span>
-                              <button onClick={() => { setV1VocalFile(null); setV1VocalUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 border border-emerald-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                {v1VocalFile.name}
+                              </span>
+                              <button onClick={() => { setV1VocalFile(null); setV1VocalUri(null); }} type="button" className="text-red-400 hover:text-red-300 ml-2 shrink-0">Remover</button>
                             </div>
                           )}
                         </div>
@@ -739,13 +808,23 @@ export default function Landing() {
                               <span className="text-xs text-slate-300">Selecionar Playback 1</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) { setV1InstFile(f); handleUploadFile(f, setV1InstUri); }
+                                if (f) { setV1InstFile(f); setV1InstUri(null); handleUploadFile("v1Inst", f, setV1InstUri); }
                               }} />
                             </label>
+                          ) : uploadingFiles["v1Inst"] || !v1InstUri ? (
+                            <div className="text-xs text-amber-300 mt-1 flex items-center justify-between bg-slate-900 border border-amber-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                                Enviando {v1InstFile.name}...
+                              </span>
+                            </div>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
-                              <span>✓ {v1InstFile.name}</span>
-                              <button onClick={() => { setV1InstFile(null); setV1InstUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 border border-emerald-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                {v1InstFile.name}
+                              </span>
+                              <button onClick={() => { setV1InstFile(null); setV1InstUri(null); }} type="button" className="text-red-400 hover:text-red-300 ml-2 shrink-0">Remover</button>
                             </div>
                           )}
                         </div>
@@ -764,13 +843,23 @@ export default function Landing() {
                               <span className="text-xs text-slate-300">Selecionar Vocal 2 (Opcional)</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) { setV2VocalFile(f); handleUploadFile(f, setV2VocalUri); }
+                                if (f) { setV2VocalFile(f); setV2VocalUri(null); handleUploadFile("v2Vocal", f, setV2VocalUri); }
                               }} />
                             </label>
+                          ) : uploadingFiles["v2Vocal"] || !v2VocalUri ? (
+                            <div className="text-xs text-amber-300 mt-1 flex items-center justify-between bg-slate-900 border border-amber-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                                Enviando {v2VocalFile.name}...
+                              </span>
+                            </div>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
-                              <span>✓ {v2VocalFile.name}</span>
-                              <button onClick={() => { setV2VocalFile(null); setV2VocalUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 border border-emerald-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                {v2VocalFile.name}
+                              </span>
+                              <button onClick={() => { setV2VocalFile(null); setV2VocalUri(null); }} type="button" className="text-red-400 hover:text-red-300 ml-2 shrink-0">Remover</button>
                             </div>
                           )}
                         </div>
@@ -783,13 +872,23 @@ export default function Landing() {
                               <span className="text-xs text-slate-300">Selecionar Playback 2 (Opcional)</span>
                               <input type="file" accept="audio/*" className="hidden" onChange={(e) => {
                                 const f = e.target.files?.[0];
-                                if (f) { setV2InstFile(f); handleUploadFile(f, setV2InstUri); }
+                                if (f) { setV2InstFile(f); setV2InstUri(null); handleUploadFile("v2Inst", f, setV2InstUri); }
                               }} />
                             </label>
+                          ) : uploadingFiles["v2Inst"] || !v2InstUri ? (
+                            <div className="text-xs text-amber-300 mt-1 flex items-center justify-between bg-slate-900 border border-amber-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                                Enviando {v2InstFile.name}...
+                              </span>
+                            </div>
                           ) : (
-                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 p-2 rounded">
-                              <span>✓ {v2InstFile.name}</span>
-                              <button onClick={() => { setV2InstFile(null); setV2InstUri(null); }} className="text-red-400 hover:text-red-300 ml-2">Remover</button>
+                            <div className="text-xs text-emerald-400 mt-1 flex items-center justify-between bg-slate-900 border border-emerald-500/30 p-2 rounded">
+                              <span className="flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                {v2InstFile.name}
+                              </span>
+                              <button onClick={() => { setV2InstFile(null); setV2InstUri(null); }} type="button" className="text-red-400 hover:text-red-300 ml-2 shrink-0">Remover</button>
                             </div>
                           )}
                         </div>
@@ -804,12 +903,21 @@ export default function Landing() {
               <Button
                 size="lg"
                 onClick={handleStartProduction}
-                disabled={uploadingClientAudio || uploadingPreGen}
+                disabled={isUploadingFiles}
                 className="w-full sm:w-auto min-w-[280px] bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white font-bold py-6 text-base shadow-xl shadow-indigo-600/20 gap-2 rounded-xl transition-all"
               >
-                <Sparkles className="w-5 h-5" />
-                Iniciar Produção Musical
-                <ArrowRight className="w-5 h-5" />
+                {isUploadingFiles ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Enviando arquivos de áudio...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    Iniciar Produção Musical
+                    <ArrowRight className="w-5 h-5" />
+                  </>
+                )}
               </Button>
             </div>
           </div>

@@ -1,5 +1,4 @@
-import { Deno } from "base44:runtime";
-import { base44 } from "base44:runtime";
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import {
   createSunoGenerationTask,
   pollSunoGeneration,
@@ -18,7 +17,7 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-async function uploadAudioFile(buffer: ArrayBuffer, filename: string, mime: string) {
+async function uploadAudioFile(base44: any, buffer: ArrayBuffer, filename: string, mime: string) {
   const fileObj = new File([buffer], filename, { type: mime });
   const uploadRes = await base44.asServiceRole.integrations.Core.UploadPrivateFile({
     file: fileObj,
@@ -31,8 +30,10 @@ async function uploadAudioFile(buffer: ArrayBuffer, filename: string, mime: stri
   return { fileUri, signedUrl: signedRes.signed_url };
 }
 
-Deno.serve(async (req: Request) => {
+const handler = async (req: Request): Promise<Response> => {
+  let base44: any = null;
   try {
+    base44 = createClientFromRequest(req);
     const payload = await req.json();
     const {
       action,
@@ -122,6 +123,7 @@ Deno.serve(async (req: Request) => {
           audio1_name: payload.audio1_name || ("Produção musical - versão " + version),
           audio2_file_uri: clientUri,
           phone: phone || "",
+          phone_digits: (phone || "").replace(/\D/g, ""),
           direct_stems: true,
           version,
           vocal1_uri: stem.vocal,
@@ -297,18 +299,18 @@ Deno.serve(async (req: Request) => {
       upPreviaVoz1, upPreviaVoz2,
       upPreviaInst1, upPreviaInst2,
     ] = await Promise.all([
-      uploadAudioFile(track1.finalWav, "final_com_voz_01.wav", "audio/wav"),
-      uploadAudioFile(track1.finalMp3, "final_com_voz_01.mp3", "audio/mpeg"),
-      uploadAudioFile(track2.finalWav, "final_com_voz_02.wav", "audio/wav"),
-      uploadAudioFile(track2.finalMp3, "final_com_voz_02.mp3", "audio/mpeg"),
-      uploadAudioFile(p1Audio.mp3, "playback_01.mp3", "audio/mpeg"),
-      uploadAudioFile(p1Audio.wav, "playback_01.wav", "audio/wav"),
-      uploadAudioFile(p2Audio.mp3, "playback_02.mp3", "audio/mpeg"),
-      uploadAudioFile(p2Audio.wav, "playback_02.wav", "audio/wav"),
-      uploadAudioFile(track1.previewMp3, "previa_voz_01.mp3", "audio/mpeg"),
-      uploadAudioFile(track2.previewMp3, "previa_voz_02.mp3", "audio/mpeg"),
-      uploadAudioFile(previaInst1, "previa_playback_01.mp3", "audio/mpeg"),
-      uploadAudioFile(previaInst2, "previa_playback_02.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, track1.finalWav, "final_com_voz_01.wav", "audio/wav"),
+      uploadAudioFile(base44, track1.finalMp3, "final_com_voz_01.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, track2.finalWav, "final_com_voz_02.wav", "audio/wav"),
+      uploadAudioFile(base44, track2.finalMp3, "final_com_voz_02.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, p1Audio.mp3, "playback_01.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, p1Audio.wav, "playback_01.wav", "audio/wav"),
+      uploadAudioFile(base44, p2Audio.mp3, "playback_02.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, p2Audio.wav, "playback_02.wav", "audio/wav"),
+      uploadAudioFile(base44, track1.previewMp3, "previa_voz_01.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, track2.previewMp3, "previa_voz_02.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, previaInst1, "previa_playback_01.mp3", "audio/mpeg"),
+      uploadAudioFile(base44, previaInst2, "previa_playback_02.mp3", "audio/mpeg"),
     ]);
 
     // 7. Chamada ao Google Drive com isolamento de erro (não-bloqueante contra 504)
@@ -331,7 +333,6 @@ Deno.serve(async (req: Request) => {
         },
       });
 
-      // Aguarda até 4 segundos no máximo; se o Drive demorar, não derruba a resposta com 504
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Drive timeout tolerado")), 4000)
       );
@@ -363,6 +364,17 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error: any) {
     console.error("[runPipeline] Erro:", error);
-    return Response.json({ error: error?.message || "Erro interno no processamento" }, { status: 500 });
+    return Response.json({
+      error: error?.message || "Erro interno no processamento",
+      details: String(error?.stack || error || "")
+    }, { status: 500 });
   }
-});
+};
+
+export default handler;
+
+if (typeof (globalThis as any).Deno?.serve === "function") {
+  try {
+    (globalThis as any).Deno.serve(handler);
+  } catch {}
+}

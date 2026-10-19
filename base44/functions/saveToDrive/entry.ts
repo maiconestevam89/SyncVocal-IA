@@ -14,7 +14,7 @@ async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   return buf;
 }
 
-Deno.serve(async (req: Request) => {
+const handler = async (req: Request): Promise<Response> => {
   let base44: any = null;
 
   try {
@@ -63,3 +63,12 @@ Deno.serve(async (req: Request) => {
     return Response.json({ success: false, error: err.message });
   }
 });
+
+
+export default handler;
+
+if (typeof (globalThis as any).Deno?.serve === "function") {
+  try {
+    (globalThis as any).Deno.serve(handler);
+  } catch {}
+}
