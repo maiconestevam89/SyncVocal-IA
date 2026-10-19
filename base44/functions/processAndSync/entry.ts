@@ -35,7 +35,7 @@ async function resolveAudioUrl(base44: any, source: string): Promise<string> {
   if (/^https?:\/\//i.test(source)) return source;
   const signed = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
     file_uri: source,
-    expires_in: 86400,
+    expires_in: 3600,
   });
   return signed.signed_url;
 }
@@ -214,11 +214,11 @@ export default async function(req) {
       instrumental.channels[0].fill(0);
 
       const [result_url, result_mp3_url, preview_url, playback_wav_url, playback_mp3_url] = await Promise.all([
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_uri, expires_in: 86400 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_mp3_uri, expires_in: 86400 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: preview_uri, expires_in: 86400 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_wav_uri, expires_in: 86400 }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_mp3_uri, expires_in: 86400 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_mp3_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: preview_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_wav_uri, expires_in: 3600 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_mp3_uri, expires_in: 3600 }),
       ]).then((items: any[]) => items.map((item) => item.signed_url));
 
       if (job_id) {

@@ -25,7 +25,7 @@ async function uploadAudioFile(base44: any, buffer: ArrayBuffer, filename: strin
   const fileUri = uploadRes.file_uri;
   const signedRes = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
     file_uri: fileUri,
-    expires_in: 86400 * 7,
+    expires_in: 3600,
   });
   return { fileUri, signedUrl: signedRes.signed_url };
 }
