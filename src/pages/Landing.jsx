@@ -239,13 +239,18 @@ export default function Landing() {
         setPipelineMessage("Mixando sua voz com os stems e gerando arquivos WAV e MP3...");
         const payload = {
           client_audio_uri: clientUri,
+          clientAudioFileUri: clientUri,
           phone,
           customer_name: customerName,
           hasDirectStems: true,
           pre_generated_v1_vocal_uri: v1VocalUri,
+          v1VocalFileUri: v1VocalUri,
           pre_generated_v1_instrumental_uri: v1InstUri,
+          v1InstFileUri: v1InstUri,
           pre_generated_v2_vocal_uri: v2VocalUri || v1VocalUri,
+          v2VocalFileUri: v2VocalUri || v1VocalUri,
           pre_generated_v2_instrumental_uri: v2InstUri || v1InstUri,
+          v2InstFileUri: v2InstUri || v1InstUri,
         };
 
         console.log("Disparando runPipeline (Stems diretos):", payload);
@@ -331,6 +336,7 @@ export default function Landing() {
         setPipelineMessage("Passo 3/3: Sincronizando sua voz e gerando masters...");
         const mixRes = await base44.functions.invoke("runPipeline", {
           client_audio_uri: clientUri,
+          clientAudioFileUri: clientUri,
           phone,
           customer_name: customerName,
           stems1,

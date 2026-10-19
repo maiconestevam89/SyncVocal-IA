@@ -12,45 +12,6 @@ import {
   convertToWavAndMp3,
 } from "../../shared/audioProcessor.ts";
 
-function ensureValidWavHeader(arrayBuffer: ArrayBuffer): ArrayBuffer {
-  const bytes = new Uint8Array(arrayBuffer);
-  if (
-    bytes.length >= 12 &&
-    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-    bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45
-  ) {
-    return arrayBuffer;
-  }
-  const sampleRate = 22050;
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
-  const blockAlign = numChannels * (bitsPerSample / 8);
-  const dataSize = bytes.length;
-  const chunkSize = 36 + dataSize;
-  const wavHeader = new ArrayBuffer(44);
-  const view = new DataView(wavHeader);
-
-  view.setUint32(0, 0x52494646, false); // "RIFF"
-  view.setUint32(4, chunkSize, true);
-  view.setUint32(8, 0x57415645, false); // "WAVE"
-  view.setUint32(12, 0x666d7420, false); // "fmt "
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-  view.setUint32(36, 0x64617461, false); // "data"
-  view.setUint32(40, dataSize, true);
-
-  const combined = new Uint8Array(44 + bytes.length);
-  combined.set(new Uint8Array(wavHeader), 0);
-  combined.set(bytes, 44);
-  return combined.buffer;
-}
-
 async function fetchBuffer(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Falha ao baixar áudio (${res.status}): ${url}`);
@@ -78,12 +39,17 @@ Deno.serve(async (req: Request) => {
       jobId,
       lyrics,
       musicPrompt,
-      clientAudioFileUri,
-      hasDirectStems,
-      v1VocalFileUri,
-      v1InstFileUri,
-      v2VocalFileUri,
-      v2InstFileUri,
+      clientAudioFileUri: clientAudioFileUriRaw,
+      client_audio_uri: clientAudioUriSnake,
+      hasDirectStems: hasDirectStemsRaw,
+      v1VocalFileUri: v1VocalFileUriRaw,
+      pre_generated_v1_vocal_uri: v1VocalUriSnake,
+      v1InstFileUri: v1InstFileUriRaw,
+      pre_generated_v1_instrumental_uri: v1InstUriSnake,
+      v2VocalFileUri: v2VocalFileUriRaw,
+      pre_generated_v2_vocal_uri: v2VocalUriSnake,
+      v2InstFileUri: v2InstFileUriRaw,
+      pre_generated_v2_instrumental_uri: v2InstUriSnake,
       stems1: providedStems1,
       stems2: providedStems2,
       phone,
@@ -133,6 +99,13 @@ Deno.serve(async (req: Request) => {
         return Response.json({ status: "ERROR", error: msg });
       }
     }
+
+    const clientAudioFileUri = clientAudioFileUriRaw || clientAudioUriSnake;
+    const hasDirectStems = hasDirectStemsRaw ?? Boolean(v1VocalFileUriRaw || v1VocalUriSnake);
+    const v1VocalFileUri = v1VocalFileUriRaw || v1VocalUriSnake;
+    const v1InstFileUri = v1InstFileUriRaw || v1InstUriSnake;
+    const v2VocalFileUri = v2VocalFileUriRaw || v2VocalUriSnake || v1VocalFileUri;
+    const v2InstFileUri = v2InstFileUriRaw || v2InstUriSnake || v1InstFileUri;
 
     // ==========================================
     // FLUXO DE PROCESSAMENTO, ALINHAMENTO E MIX
@@ -188,11 +161,12 @@ Deno.serve(async (req: Request) => {
       fetchBuffer(v2InstUrl),
     ]);
 
-    const clientBuffer = ensureValidWavHeader(clientRaw);
-    const v1VocalBuffer = ensureValidWavHeader(v1VocalRaw);
-    const v1InstBuffer = ensureValidWavHeader(v1InstRaw);
-    const v2VocalBuffer = ensureValidWavHeader(v2VocalRaw);
-    const v2InstBuffer = ensureValidWavHeader(v2InstRaw);
+    // Passa os bytes originais: audioProcessor detecta e decodifica WAV/MP3/WebM real.
+    const clientBuffer = clientRaw;
+    const v1VocalBuffer = v1VocalRaw;
+    const v1InstBuffer = v1InstRaw;
+    const v2VocalBuffer = v2VocalRaw;
+    const v2InstBuffer = v2InstRaw;
 
     // 4. Processamento paralelo de DSP para Faixa 1 e Faixa 2
     const [track1, track2] = await Promise.all([
@@ -209,10 +183,12 @@ Deno.serve(async (req: Request) => {
     ]);
 
     // 5. Gera playbacks em WAV e MP3 e prévias instrumentais
-    const p1Audio = convertToWavAndMp3(v1InstBuffer);
-    const p2Audio = convertToWavAndMp3(v2InstBuffer);
-    const previaInst1 = create70sPreviewMp3(v1InstBuffer);
-    const previaInst2 = create70sPreviewMp3(v2InstBuffer);
+    const [p1Audio, p2Audio, previaInst1, previaInst2] = await Promise.all([
+      convertToWavAndMp3(v1InstBuffer),
+      convertToWavAndMp3(v2InstBuffer),
+      create70sPreviewMp3(v1InstBuffer),
+      create70sPreviewMp3(v2InstBuffer),
+    ]);
 
     // 6. Upload paralelo dos arquivos finais
     const [
