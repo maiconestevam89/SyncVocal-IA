@@ -1,0 +1,299 @@
+export const UTALK_BASE = "https://app-utalk.umbler.com/api";
+
+const PHONE_REGEX = /(?<!\d)(?:\+?55[\s.\-]*)?\(?(\d{2})\)?[\s.\-]*(9?\d{4})[\s.\-]*(\d{4})(?!\d)/;
+
+export function extractPhone(text: string): { e164: string; digits: string; ddd: string; formatted: string } | null {
+  if (!text) return null;
+  const m = String(text).match(PHONE_REGEX);
+  if (!m) {
+    const rawDigits = String(text).replace(/\D/g, "");
+    const cleanDigits = rawDigits.startsWith("55") && rawDigits.length >= 12 ? rawDigits.slice(2) : rawDigits;
+    if (cleanDigits.length === 10 || cleanDigits.length === 11) {
+      const ddd = cleanDigits.slice(0, 2);
+      const rest = cleanDigits.slice(2);
+      const p1 = rest.length === 9 ? rest.slice(0, 5) : rest.slice(0, 4);
+      const p2 = rest.length === 9 ? rest.slice(5) : rest.slice(4);
+      return {
+        e164: `+55${cleanDigits}`,
+        digits: cleanDigits,
+        ddd,
+        formatted: `${ddd} ${p1}-${p2}`,
+      };
+    }
+    return null;
+  }
+
+  const ddd = m[1];
+  const p1 = m[2];
+  const p2 = m[3];
+  const cleanDigits = `${ddd}${p1}${p2}`;
+  return {
+    e164: `+55${cleanDigits}`,
+    digits: cleanDigits,
+    ddd,
+    formatted: `${ddd} ${p1}-${p2}`,
+  };
+}
+
+export function ensureE164(phone: string): string {
+  if (!phone) return "";
+  const cleaned = phone.replace(/[^\d+]/g, "");
+  if (cleaned.startsWith("+")) return cleaned;
+  if (cleaned.startsWith("55")) return `+${cleaned}`;
+  return `+55${cleaned}`;
+}
+
+export function truncate(obj: any, max = 2000): string {
+  const str = typeof obj === "string" ? obj : JSON.stringify(obj);
+  return str.length > max ? str.slice(0, max) : str;
+}
+
+export async function invokeStartBot({
+  apiToken,
+  botId,
+  orgId,
+  triggerName,
+  channelPhone,
+  customerPhone,
+}: {
+  apiToken: string;
+  botId: string;
+  orgId: string;
+  triggerName: string;
+  channelPhone: string;
+  customerPhone: string;
+}) {
+  const fromPhone = ensureE164(channelPhone);
+  const toPhone = ensureE164(customerPhone);
+
+  const attempts = [
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot/`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: fromPhone, fromPhone: toPhone },
+      label: "oficial_com_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: fromPhone, fromPhone: toPhone },
+      label: "oficial_sem_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot/`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: toPhone, fromPhone: fromPhone },
+      label: "invertido_com_barra",
+    },
+    {
+      url: `${UTALK_BASE}/v1/chats/start-bot`,
+      body: { botId, organizationId: orgId, triggerName, toPhone: toPhone, fromPhone: fromPhone },
+      label: "invertido_sem_barra",
+    },
+  ];
+
+  let lastStatus = 0;
+  let lastData: any = null;
+
+  for (const att of attempts) {
+    try {
+      const res = await fetch(att.url, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(att.body),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      lastStatus = res.status;
+      try { lastData = await res.json(); } catch { lastData = await res.text(); }
+
+      if (res.ok) {
+        return { ok: true, status: lastStatus, data: lastData, attempt: att.label };
+      }
+    } catch (err: any) {
+      lastStatus = 500;
+      lastData = err?.message || String(err);
+    }
+  }
+
+  return { ok: false, status: lastStatus, data: lastData };
+}
+
+export async function sendUmblerTextMessage({
+  apiToken,
+  orgId,
+  channelPhone,
+  customerPhone,
+  text,
+}: {
+  apiToken: string;
+  orgId: string;
+  channelPhone: string;
+  customerPhone: string;
+  text: string;
+}) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
+  // Tenta envio simplificado via FormData
+  try {
+    const formData = new FormData();
+    formData.append("ToPhone", to);
+    formData.append("FromPhone", from);
+    formData.append("OrganizationId", orgId);
+    formData.append("Message", text);
+
+    const res = await fetch(`${UTALK_BASE}/v1/messages/simplified/`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiToken}` },
+      body: formData,
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (res.ok) {
+      let data;
+      try { data = await res.json(); } catch { data = await res.text(); }
+      return { ok: true, status: res.status, data };
+    }
+  } catch (err) {
+    // continua para tentativa JSON
+  }
+
+  // Fallback JSON
+  const jsonRes = await fetch(`${UTALK_BASE}/v1/messages/simplified/`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      toPhone: to,
+      fromPhone: from,
+      organizationId: orgId,
+      message: text,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  let data;
+  try { data = await jsonRes.json(); } catch { data = await jsonRes.text(); }
+  return { ok: jsonRes.ok, status: jsonRes.status, data };
+}
+
+export async function sendUmblerMediaFile({
+  apiToken,
+  orgId,
+  channelPhone,
+  customerPhone,
+  fileBlob,
+  fileName,
+}: {
+  apiToken: string;
+  orgId: string;
+  channelPhone: string;
+  customerPhone: string;
+  fileBlob: Blob;
+  fileName: string;
+}) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
+  const formData = new FormData();
+  formData.append("ToPhone", to);
+  formData.append("FromPhone", from);
+  formData.append("OrganizationId", orgId);
+  formData.append("File", fileBlob, fileName);
+
+  const res = await fetch(`${UTALK_BASE}/v1/messages/simplified/`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiToken}` },
+    body: formData,
+    signal: AbortSignal.timeout(90000),
+  });
+
+  let data;
+  try { data = await res.json(); } catch { data = await res.text(); }
+  return { ok: res.ok, status: res.status, data };
+}
+
+export async function sendUmblerTemplateMessage({
+  apiToken,
+  orgId,
+  channelPhone,
+  customerPhone,
+  templateNameOrId,
+  params,
+}: {
+  apiToken: string;
+  orgId: string;
+  channelPhone: string;
+  customerPhone: string;
+  templateNameOrId: string;
+  params: string[];
+}) {
+  const from = ensureE164(channelPhone);
+  const to = ensureE164(customerPhone);
+
+  let targetTemplateId = templateNameOrId;
+
+  // Se for o nome do template (ex: "cobrana_pix_qr"), busca o ID correspondente na organização
+  try {
+    const listUrl = `${UTALK_BASE}/v1/templates/?organizationId=${encodeURIComponent(orgId)}&queryString=${encodeURIComponent(templateNameOrId)}`;
+    const res = await fetch(listUrl, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${apiToken}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const items = data?.items || (Array.isArray(data) ? data : []);
+      const matched = items.find((t: any) => 
+        t.label === templateNameOrId || 
+        t.id === templateNameOrId || 
+        t.label?.toLowerCase() === templateNameOrId.toLowerCase()
+      );
+      if (matched?.id) {
+        targetTemplateId = matched.id;
+      }
+    }
+  } catch (lookupErr) {
+    console.warn("[Umbler Template Lookup Warning]:", lookupErr);
+  }
+
+  try {
+    const res = await fetch(`${UTALK_BASE}/v1/template-messages/simplified/`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        toPhone: to,
+        fromPhone: from,
+        organizationId: orgId,
+        templateId: targetTemplateId,
+        params,
+        skipReassign: false,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    let resData: any = null;
+    try { resData = await res.json(); } catch { resData = await res.text(); }
+
+    return {
+      ok: res.ok,
+      status: res.status,
+      data: resData,
+      templateIdUsed: targetTemplateId,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      error: err?.message || String(err),
+      templateIdUsed: targetTemplateId,
+    };
+  }
+}
+

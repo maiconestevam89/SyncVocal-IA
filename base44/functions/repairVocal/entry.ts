@@ -1,0 +1,161 @@
+import { secrets } from "base44:runtime";
+
+// Applies AI Vocal Repair (Kits.ai) to an isolated vocal. The Kits API doesn't
+// expose a dedicated "repair" endpoint, but its Voice Conversion API accepts
+// pre-processing effects (NoiseGate, HighPassFilter, Compressor) that perform
+// the same cleanup the web Vocal Repair tool does: noise removal, low-cut, and
+// dynamics control. We send the isolated vocal with those effects and no voice
+// model change, so the output is the same voice — cleaned up.
+//
+// Kits API reference:
+//   POST https://arpeggi.io/api/kits/v1/voice-conversions  (multipart)
+//   GET  https://arpeggi.io/api/kits/v1/voice-conversions/:id
+// The output URL (lossyOutputFileUrl / outputFileUrl) is signed and expires in 4h.
+
+const KITS_BASE = "https://arpeggi.io/api/kits/v1";
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 180000; // 3 min ceiling for the repair job
+
+// Detect audio format from file magic bytes (see isolateVocal for details).
+function detectAudioFormat(bytes: ArrayBuffer): { ext: string; type: string; supported: boolean } {
+  const v = new Uint8Array(bytes);
+  if (v.length < 12) return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0x52 && v[1] === 0x49 && v[2] === 0x46 && v[3] === 0x46 &&
+      v[8] === 0x57 && v[9] === 0x41 && v[10] === 0x56 && v[11] === 0x45)
+    return { ext: "wav", type: "audio/wav", supported: true };
+  if (v[0] === 0x66 && v[1] === 0x4C && v[2] === 0x61 && v[3] === 0x43)
+    return { ext: "flac", type: "audio/flac", supported: true };
+  if (v[0] === 0x49 && v[1] === 0x44 && v[2] === 0x33)
+    return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0xFF && (v[1] === 0xFB || v[1] === 0xF3 || v[1] === 0xF2))
+    return { ext: "mp3", type: "audio/mpeg", supported: true };
+  if (v[0] === 0x4F && v[1] === 0x67 && v[2] === 0x67 && v[3] === 0x53)
+    return { ext: "ogg", type: "audio/ogg", supported: false };
+  if (v[0] === 0x1A && v[1] === 0x45 && v[2] === 0xDF && v[3] === 0xA3)
+    return { ext: "webm", type: "audio/webm", supported: true };
+  if (v.length >= 8 && v[4] === 0x66 && v[5] === 0x74 && v[6] === 0x79 && v[7] === 0x70)
+    return { ext: "m4a", type: "audio/mp4", supported: false };
+  return { ext: "mp3", type: "audio/mpeg", supported: true };
+}
+
+export default async function(req) {
+  try {
+    const apiKey = secrets.get("KITS_API_KEY");
+    if (!apiKey) {
+      return Response.json({ error: "Chave KITS_API_KEY não configurada." }, { status: 500 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const fileUrl = body?.file_url;
+    if (!fileUrl || typeof fileUrl !== "string") {
+      return Response.json({ error: "Parâmetro file_url ausente." }, { status: 400 });
+    }
+
+    // Download the isolated vocal bytes.
+    const fileRes = await fetch(fileUrl, { signal: AbortSignal.timeout(60000) });
+    if (!fileRes.ok) {
+      return Response.json(
+        { error: `Falha ao ler vocal isolado: ${fileRes.status}` },
+        { status: 502 }
+      );
+    }
+    const fileBytes = await fileRes.arrayBuffer();
+    const { ext, type: fileContentType } = detectAudioFormat(fileBytes);
+    const filename = `input.${ext}`;
+
+    // Pre-processing effects = the "repair": noise gate + high-pass + gentle
+    // compression. We pass the JSON as a form field (Kits expects stringified).
+    const pre = JSON.stringify({
+      NoiseGate: { threshold_db: -50, ratio: 4, attack_ms: 5, release_ms: 100 },
+      HighPassFilter: { cutoff_frequency_hz: 80 },
+      Compressor: { threshold_db: -24, ratio: 3, attack_ms: 10, release_ms: 100 },
+    });
+
+    const form = new FormData();
+    form.append("soundFile", new Blob([fileBytes], { type: fileContentType }), filename);
+    form.append("pre", pre);
+
+    // Create the voice-conversion job. No voiceModelId → Kits returns the same
+    // voice with only the pre/post processing applied (identity conversion).
+    const createRes = await fetch(`${KITS_BASE}/voice-conversions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (!createRes.ok) {
+      const detail = await createRes.text().catch(() => "");
+      // On 422 the body usually carries the exact validation message, which is
+      // the single most useful thing to surface back to the app.
+      return Response.json(
+        {
+          error: `Kits (criar repair): ${createRes.status}`,
+          detail: detail || null,
+        },
+        { status: createRes.status === 422 ? 422 : 502 }
+      );
+    }
+
+    const job = await createRes.json();
+    const jobId = job?.id;
+    if (!jobId) {
+      return Response.json({ error: "Resposta do Kits sem id de job." }, { status: 502 });
+    }
+
+    // Poll until terminal state.
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    let result = job;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      const pollRes = await fetch(`${KITS_BASE}/voice-conversions/${jobId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!pollRes.ok) {
+        const detail = await pollRes.text().catch(() => "");
+        return Response.json(
+          { error: `Kits (consultar repair): ${pollRes.status}`, detail },
+          { status: 502 }
+        );
+      }
+      result = await pollRes.json();
+      if (result?.status === "success" || result?.status === "error" || result?.status === "cancelled") {
+        break;
+      }
+    }
+
+    if (result?.status !== "success") {
+      return Response.json(
+        { error: `Repair não concluído (status: ${result?.status ?? "timeout"}).` },
+        { status: 502 }
+      );
+    }
+
+    const outputUrl = result?.lossyOutputFileUrl || result?.outputFileUrl;
+    if (!outputUrl) {
+      return Response.json({ error: "Repair concluído sem URL de saída." }, { status: 502 });
+    }
+
+    // Stream the repaired vocal bytes back to the client.
+    const audioRes = await fetch(outputUrl, { signal: AbortSignal.timeout(60000) });
+    if (!audioRes.ok) {
+      return Response.json(
+        { error: `Falha ao baixar vocal reparado: ${audioRes.status}` },
+        { status: 502 }
+      );
+    }
+    const audioBytes = await audioRes.arrayBuffer();
+    const audioType = audioRes.headers.get("content-type") || "audio/mpeg";
+
+    return new Response(audioBytes, {
+      status: 200,
+      headers: {
+        "Content-Type": audioType,
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}

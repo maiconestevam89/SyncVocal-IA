@@ -1,0 +1,142 @@
+{
+  "name": "ProcessingJob",
+  "type": "object",
+  "properties": {
+    "audio1_name": {
+      "type": "string",
+      "description": "Nome do arquivo do Áudio 1"
+    },
+    "audio1_file_uri": {
+      "type": "string",
+      "description": "URI do Áudio 1 no storage privado"
+    },
+    "audio2_file_uri": {
+      "type": "string",
+      "description": "URI do Áudio 2 no storage privado"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Telefone do cliente formatado ou E.164"
+    },
+    "phone_digits": {
+      "type": "string",
+      "description": "Apenas os dígitos do telefone"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "checking_copyright",
+        "copyright_blocked",
+        "transcribing",
+        "generating_suno",
+        "separating_stems",
+        "cleaning_vocals",
+        "mastering_vocal",
+        "mixing",
+        "uploading_drive",
+        "completed",
+        "failed"
+      ],
+      "default": "pending",
+      "description": "Status do processamento"
+    },
+    "copyright_detected": {
+      "type": "boolean",
+      "default": false
+    },
+    "copyright_details": {
+      "type": "object",
+      "description": "Detalhes de direitos autorais identificados pelo Music.ai"
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Letra transcrita e organizada pelo Gemini"
+    },
+    "style_prompt": {
+      "type": "string",
+      "description": "Prompt musical gerado para o Suno"
+    },
+    "suno_task_id": {
+      "type": "string"
+    },
+    "suno_v1_audio_url": {
+      "type": "string"
+    },
+    "suno_v2_audio_url": {
+      "type": "string"
+    },
+    "suno_v1_playback_url": {
+      "type": "string"
+    },
+    "suno_v2_playback_url": {
+      "type": "string"
+    },
+    "v1_vocal_uri": {
+      "type": "string"
+    },
+    "v1_instrumental_uri": {
+      "type": "string"
+    },
+    "v2_vocal_uri": {
+      "type": "string"
+    },
+    "v2_instrumental_uri": {
+      "type": "string"
+    },
+    "clean_vocals_uri": {
+      "type": "string"
+    },
+    "ai_mastered_uri": {
+      "type": "string"
+    },
+    "final_v1_uri": {
+      "type": "string"
+    },
+    "final_v2_uri": {
+      "type": "string"
+    },
+    "final_voz_v1_uri": {
+      "type": "string"
+    },
+    "final_voz_v2_uri": {
+      "type": "string"
+    },
+    "preview_v1_uri": {
+      "type": "string"
+    },
+    "preview_v2_uri": {
+      "type": "string"
+    },
+    "preview_voz_v1_uri": {
+      "type": "string"
+    },
+    "preview_voz_v2_uri": {
+      "type": "string"
+    },
+    "drive_folder_id": {
+      "type": "string"
+    },
+    "drive_subfolder_name": {
+      "type": "string"
+    },
+    "shared_drive_link": {
+      "type": "string"
+    },
+    "asaas_payment_id": {
+      "type": "string"
+    },
+    "pix_code": {
+      "type": "string"
+    },
+    "pix_qr_base64": {
+      "type": "string"
+    },
+    "error_message": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status"
+  ]
+}
