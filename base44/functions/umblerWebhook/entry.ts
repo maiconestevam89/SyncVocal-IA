@@ -1,9 +1,14 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.52';
 import { secrets } from 'base44:runtime';
-import { extractPhone, sendUmblerTextMessage, truncate } from '../../shared/umblerTalk.ts';
+import {
+  extractPhone,
+  sendUmblerTextMessage,
+  sendUmblerTemplateMessage,
+  truncate,
+} from '../../shared/umblerTalk.ts';
 import {
   findOrCreateAsaasCustomer,
-  createAsaasPixPaymentOrLink,
+  createAsaasPixPayment,
   getAsaasPixQrCode,
   findPendingAsaasPayment,
   findRecentPaidAsaasPayment,
@@ -24,7 +29,7 @@ export default async function(req: Request) {
   if (req.method === "GET") {
     return Response.json({
       status: "online",
-      description: "Webhook do Umbler Talk v3 (anti-pausa, debounce de rajadas e fallback para Link de Pagamento Asaas)",
+      description: "Webhook do Umbler Talk v4 (Template Meta cobrana_pix_qr, debounce e anti-pausa)",
     });
   }
 
@@ -47,7 +52,7 @@ export default async function(req: Request) {
     return Response.json({ ignored: true, reason: "Evento de confirmação (ACK) ignorado." });
   }
 
-  // 2. Extrai o texto da MENSAGEM ATUAL (não vasculhar o array histórico para evitar loops e falsos positivos)
+  // 2. Extrai o texto da MENSAGEM ATUAL (não vasculhar o histórico todo para evitar falsos positivos)
   const currentMessageText = (
     body?.Payload?.Content?.LastMessage?.Content ||
     body?.Payload?.Content?.Message?.Content ||
@@ -68,10 +73,7 @@ export default async function(req: Request) {
   // 3. TRAVA ANTI-LOOP: Rejeitar mensagens do próprio sistema
   const isSelfSystemMessage =
     normalizedMessage.includes("aqui esta o seu pix") ||
-    normalizedMessage.includes("aqui esta o seu link") ||
-    normalizedMessage.includes("codigo pix copia e cola") ||
-    normalizedMessage.includes("ou pague pelo link") ||
-    normalizedMessage.includes("acesse para pagar via pix") ||
+    normalizedMessage.includes("chave pix copia e cola") ||
     normalizedMessage.includes("assim que o pagamento for identificado") ||
     normalizedMessage.includes("pagamento confirmado") ||
     normalizedMessage.includes("aqui estao suas musicas") ||
@@ -87,16 +89,21 @@ export default async function(req: Request) {
     });
   }
 
-  // 4. TRAVA DE GATILHO: O gatilho é a frase específica da primeira mensagem do bot "Pendente de pagamento"
+  // 4. TRAVA DE GATILHO: Reconhece pelo bot, trigger ou mensagens de cobrança pendente
+  const incomingBotName = (body?.botName || body?.triggerName || body?.botId || "").toLowerCase();
   const isTriggerMatch =
+    incomingBotName.includes("pendente") ||
+    incomingBotName.includes("pagamento") ||
+    normalizedMessage.includes("pendente de pagamento") ||
     normalizedMessage.includes("para adquirir o playback ou colocar sua voz") ||
     normalizedMessage.includes("conclua o pagamento com os dados abaixo") ||
+    normalizedMessage.includes("conclua o pagamento") ||
     body?.force === true;
 
   if (!isTriggerMatch) {
     return Response.json({
       ignored: true,
-      reason: "Mensagem ou evento não corresponde ao texto inicial do bot 'Pendente de pagamento'.",
+      reason: "Mensagem ou evento não corresponde ao bot 'Pendente de pagamento'.",
       received_preview: truncate(currentMessageText, 100),
     });
   }
@@ -195,29 +202,30 @@ export default async function(req: Request) {
       externalReference: phoneInfo.digits,
     });
 
-    let paymentResult: { id: string; invoiceUrl: string; pixCode?: string; isLink: boolean };
+    let pixCode = "";
+    let asaasPaymentId = "";
+    let invoiceUrl = "";
 
     if (payment) {
       console.log(`Reutilizando cobrança pendente existente no Asaas: ${payment.id}`);
-      let pixCode: string | undefined;
+      asaasPaymentId = payment.id;
+      invoiceUrl = payment.invoiceUrl;
       try {
         const pixData = await getAsaasPixQrCode(asaasApiKey, payment.id);
         pixCode = pixData.payload;
       } catch {}
-      paymentResult = {
-        id: payment.id,
-        invoiceUrl: payment.invoiceUrl,
-        pixCode,
-        isLink: false,
-      };
     } else {
-      // Cria nova cobrança ou link de pagamento (com fallback automático se faltar CPF)
-      paymentResult = await createAsaasPixPaymentOrLink(asaasApiKey, {
+      // Cria cobrança PIX direta no Asaas
+      const newPayment = await createAsaasPixPayment(asaasApiKey, {
         customerId: customer.id,
         value: 49.90,
         externalReference: phoneInfo.digits,
         description: "Música Personalizada - Produção Final e Playbacks",
       });
+      asaasPaymentId = newPayment.id;
+      invoiceUrl = newPayment.invoiceUrl;
+      const pixData = await getAsaasPixQrCode(asaasApiKey, newPayment.id);
+      pixCode = pixData.payload;
     }
 
     // Registra timestamp do debounce
@@ -231,9 +239,9 @@ export default async function(req: Request) {
           phone_digits: phoneInfo.digits,
           customer_name: customerName || customer.name,
           asaas_customer_id: customer.id,
-          asaas_payment_id: paymentResult.id,
-          pix_code: paymentResult.pixCode || "",
-          invoice_url: paymentResult.invoiceUrl,
+          asaas_payment_id: asaasPaymentId,
+          pix_code: pixCode || "",
+          invoice_url: invoiceUrl,
           amount: 49.90,
           status: "pending",
         });
@@ -242,53 +250,65 @@ export default async function(req: Request) {
       }
     }
 
-    // 12. Envia mensagem para o cliente via Umbler Talk
+    // 12. Envia mensagem para o cliente via Umbler Talk com template Meta cobrana_pix_qr
     let umblerSendResult: any = null;
-    if (umblerToken && umblerOrgId && umblerChannelPhone) {
-      let pixMessage = "";
-      if (paymentResult.pixCode) {
-        pixMessage =
-          "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
-          "💵 *Valor:* R$ 49,90\n\n" +
-          "📋 *Código Pix Copia e Cola:*\n" +
-          `${paymentResult.pixCode}\n\n` +
-          "🔗 *Ou pague pelo link:*\n" +
-          `${paymentResult.invoiceUrl}\n\n` +
-          "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
-      } else {
-        pixMessage =
-          "Aqui está o seu link para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
-          "💵 *Valor:* R$ 49,90\n\n" +
-          "🔗 *Acesse para pagar via Pix:*\n" +
-          `${paymentResult.invoiceUrl}\n\n` +
-          "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
+    if (umblerToken && umblerOrgId && umblerChannelPhone && pixCode) {
+      const pixTemplateName = secrets.get("UMBLER_TALK_TEMPLATE_ID_PIX") || "cobrana_pix_qr";
+      let sentWithTemplate = false;
+
+      try {
+        const tmplRes = await sendUmblerTemplateMessage({
+          apiToken: umblerToken,
+          orgId: umblerOrgId,
+          channelPhone: umblerChannelPhone,
+          customerPhone: phoneInfo.e164,
+          templateNameOrId: pixTemplateName,
+          params: [pixCode],
+        });
+
+        if (tmplRes.ok) {
+          sentWithTemplate = true;
+          umblerSendResult = tmplRes;
+          console.log(`[Webhook PIX] Template "${pixTemplateName}" enviado com sucesso via botão Meta!`);
+        } else {
+          console.warn(`[Webhook PIX] Aviso ao enviar template "${pixTemplateName}":`, tmplRes);
+        }
+      } catch (tErr: any) {
+        console.warn("[Umbler Template PIX Warning no Webhook]:", tErr.message);
       }
 
-      umblerSendResult = await sendUmblerTextMessage({
-        apiToken: umblerToken,
-        orgId: umblerOrgId,
-        channelPhone: umblerChannelPhone,
-        customerPhone: phoneInfo.e164,
-        text: pixMessage,
-      });
+      // Se o template falhar por qualquer motivo, envia a chave em bloco de cópia direta
+      if (!sentWithTemplate) {
+        const pixMessage =
+          "Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n" +
+          "💵 *Valor:* R$ 49,90\n\n" +
+          "📋 *Chave Pix Copia e Cola:* (toque abaixo para copiar)\n" +
+          "```\n" + pixCode + "\n```\n\n" +
+          "Assim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!";
+
+        umblerSendResult = await sendUmblerTextMessage({
+          apiToken: umblerToken,
+          orgId: umblerOrgId,
+          channelPhone: umblerChannelPhone,
+          customerPhone: phoneInfo.e164,
+          text: pixMessage,
+        });
+      }
     }
 
     return Response.json({
       success: true,
-      phone: phoneInfo.e164,
-      asaas_payment_id: paymentResult.id,
-      invoice_url: paymentResult.invoiceUrl,
-      pix_code: paymentResult.pixCode || null,
-      is_link: paymentResult.isLink,
-      umbler_notified: umblerSendResult?.ok ?? false,
-      notice: "Cobrança preparada e enviada com sucesso.",
+      phone: phoneInfo.formatted,
+      asaas_payment_id: asaasPaymentId,
+      pix_code: pixCode,
+      umbler_result: umblerSendResult,
     });
-  } catch (error: any) {
-    console.error("Erro no processamento do webhook:", error);
-    // Retorna 200 com success: false para evitar que o Umbler pause o webhook
+  } catch (err: any) {
+    console.error("Erro no processamento do webhook Umbler Talk:", err);
+    // Retorna 200 com flag de erro para o Umbler não pausar a rota
     return Response.json({
       success: false,
-      error: error.message || String(error),
+      error: err.message || "Erro interno",
     }, { status: 200 });
   }
 }
