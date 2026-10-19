@@ -100,6 +100,104 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    if (action === "start_mix") {
+      const clientUri = clientAudioFileUriRaw || clientAudioUriSnake;
+      const direct = hasDirectStemsRaw ?? Boolean(v1VocalFileUriRaw || v1VocalUriSnake);
+      const stem1 = direct
+        ? { vocal: v1VocalFileUriRaw || v1VocalUriSnake, instrumental: v1InstFileUriRaw || v1InstUriSnake }
+        : { vocal: providedStems1?.vocalUrl, instrumental: providedStems1?.instrumentalUrl };
+      const stem2 = direct
+        ? {
+            vocal: v2VocalFileUriRaw || v2VocalUriSnake || stem1.vocal,
+            instrumental: v2InstFileUriRaw || v2InstUriSnake || stem1.instrumental,
+          }
+        : { vocal: providedStems2?.vocalUrl, instrumental: providedStems2?.instrumentalUrl };
+
+      if (!clientUri || !stem1.vocal || !stem1.instrumental || !stem2.vocal || !stem2.instrumental) {
+        return Response.json({ error: "Áudio do cliente e stems das duas versões são obrigatórios." }, { status: 400 });
+      }
+
+      const createMixJob = (stem: any, version: number) =>
+        base44.asServiceRole.entities.ProcessingJob.create({
+          audio1_name: payload.audio1_name || ("Produção musical - versão " + version),
+          audio2_file_uri: clientUri,
+          phone: phone || "",
+          direct_stems: true,
+          version,
+          vocal1_uri: stem.vocal,
+          vocal2_uri: clientUri,
+          instrumental_uri: stem.instrumental,
+          status: "pending",
+        });
+
+      const [job1, job2] = await Promise.all([createMixJob(stem1, 1), createMixJob(stem2, 2)]);
+      return Response.json({ success: true, jobIds: [job1.id, job2.id], job_id: job1.id });
+    }
+
+    if (action === "finalize_mix") {
+      const firstId = payload.jobId || payload.job_id;
+      const secondId = payload.otherJobId || payload.other_job_id;
+      if (!firstId || !secondId) {
+        return Response.json({ error: "Os dois IDs de processamento são obrigatórios." }, { status: 400 });
+      }
+
+      const [job1, job2] = await Promise.all([
+        base44.asServiceRole.entities.ProcessingJob.get(firstId),
+        base44.asServiceRole.entities.ProcessingJob.get(secondId),
+      ]);
+      if (job1?.status !== "completed" || job2?.status !== "completed") {
+        return Response.json({ error: "A mixagem ainda não terminou." }, { status: 409 });
+      }
+
+      await base44.asServiceRole.entities.ProcessingJob.update(firstId, {
+        preview_v2_uri: job2.preview_v2_uri,
+        preview_voz_v2_uri: job2.preview_voz_v2_uri,
+      });
+
+      let driveStatus = { saved: false, message: "O backup automático no Google Drive está pendente." };
+      try {
+        const drivePromise = base44.asServiceRole.functions.invoke("saveToDrive", {
+          job_id: firstId,
+          phone: phone || job1.phone || "",
+          urls: {
+            final_orig_1: job1.playback_mp3_url,
+            final_orig_2: job2.playback_mp3_url,
+            final_voz_1: job1.result_url,
+            final_voz_2: job2.result_url,
+          },
+        });
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 4000));
+        const driveResult: any = await Promise.race([drivePromise, timeoutPromise]);
+        if (driveResult?.timeout) {
+          driveStatus.message = "Os arquivos estão prontos; o backup no Google Drive continua em segundo plano.";
+        } else {
+          const driveData = driveResult?.data || driveResult;
+          driveStatus = driveData?.success
+            ? { saved: true, message: "Arquivos salvos no Google Drive." }
+            : { saved: false, message: driveData?.error || driveStatus.message };
+        }
+      } catch (driveError: any) {
+        driveStatus.message = driveError?.message || driveStatus.message;
+      }
+
+      return Response.json({
+        success: true,
+        job: { id: job1.id, phone: job1.phone || phone || "" },
+        job_id: job1.id,
+        downloads: {
+          final_voz_1: job1.result_url,
+          final_voz_1_mp3: job1.result_mp3_url,
+          final_voz_2: job2.result_url,
+          final_voz_2_mp3: job2.result_mp3_url,
+          playback_1: job1.playback_mp3_url,
+          playback_1_wav: job1.playback_wav_url,
+          playback_2: job2.playback_mp3_url,
+          playback_2_wav: job2.playback_wav_url,
+        },
+        drive_status: driveStatus,
+      });
+    }
+
     const clientAudioFileUri = clientAudioFileUriRaw || clientAudioUriSnake;
     const hasDirectStems = hasDirectStemsRaw ?? Boolean(v1VocalFileUriRaw || v1VocalUriSnake);
     const v1VocalFileUri = v1VocalFileUriRaw || v1VocalUriSnake;
