@@ -5,6 +5,8 @@ import {
   invokeStartBot,
   sendUmblerMediaFile,
   sendUmblerTextMessage,
+  sendUmblerTemplateMessage,
+  ensureE164,
 } from '../../shared/umblerTalk.ts';
 import {
   findOrCreateAsaasCustomer,
@@ -39,7 +41,7 @@ export default async function (req: Request): Promise<Response> {
       }, { status: 400 });
     }
 
-    // ── 1. Geração ou recuperação de cobrança Asaas sem duplicatas ──
+    // ── 1. Geração ou recuperação de cobrança Asaas única (somente PIX direto) ──
     const asaasApiKey = secrets.get("ASAAS_API_KEY");
     let pixCode = "";
     let pixQrBase64 = "";
@@ -53,7 +55,7 @@ export default async function (req: Request): Promise<Response> {
           phoneDigits: phoneInfo.digits,
         });
 
-        // Verifica se já existe pagamento pendente ou pago para evitar duplicidade
+        // Verifica se já existe pagamento pendente para evitar cobrança duplicada
         const existingPending = await findPendingAsaasPayment(asaasApiKey, {
           customerId: asaasCustomer.id,
           externalReference: `job_${job_id || phoneInfo.digits}`,
@@ -62,7 +64,6 @@ export default async function (req: Request): Promise<Response> {
         let paymentObj = existingPending;
 
         if (!paymentObj) {
-          // Cria nova cobrança PIX única
           paymentObj = await createAsaasPixPayment(asaasApiKey, {
             customerId: asaasCustomer.id,
             value: 49.90,
@@ -75,7 +76,7 @@ export default async function (req: Request): Promise<Response> {
           asaasPaymentId = paymentObj.id;
           invoiceUrl = paymentObj.invoiceUrl;
 
-          // Obtém o PIX Copia e Cola e QR Code
+          // Obtém o PIX Copia e Cola e imagem do QR Code
           const pixData = await getAsaasPixQrCode(asaasApiKey, paymentObj.id);
           pixCode = pixData.payload;
           pixQrBase64 = pixData.encodedImage;
@@ -100,7 +101,7 @@ export default async function (req: Request): Promise<Response> {
       }
     }
 
-    // ── 2. Disparo específico do Bot "pendente de pagamento" no Umbler ──
+    // ── 2. Disparo específico do Bot no Umbler ──
     const apiToken = secrets.get("UMBLER_TALK_API_TOKEN");
     const orgId = secrets.get("UMBLER_TALK_ORGANIZATION_ID");
     const channelPhone = secrets.get("UMBLER_TALK_FROM_PHONE");
@@ -121,10 +122,10 @@ export default async function (req: Request): Promise<Response> {
         console.warn("[Umbler Bot warning]:", botErr.message);
       }
 
-      // Pausa curta de 4 segundos para o bot de saudação
-      await new Promise((r) => setTimeout(r, 4000));
+      // Pausa curta de 3 segundos para o bot de saudação
+      await new Promise((r) => setTimeout(r, 3000));
 
-      // ── 3. Envio das 4 prévias pelo WhatsApp ──
+      // ── 3. Envio das 4 prévias cortadas (1:10) pelo WhatsApp ──
       const previewUris = [
         { uri: job?.preview_v1_uri, name: `${phoneInfo.formatted} - PREVIA 01.mp3` },
         { uri: job?.preview_v2_uri, name: `${phoneInfo.formatted} - PREVIA 02.mp3` },
@@ -153,17 +154,43 @@ export default async function (req: Request): Promise<Response> {
         }
       }
 
-      // ── 4. Envio do código PIX Copia e Cola direto na conversa ──
+      // ── 4. Envio do Pix via Template Oficial Aprovado "cobrana_pix_qr" ──
       if (pixCode) {
+        const pixTemplateName = secrets.get("UMBLER_TALK_TEMPLATE_ID_PIX") || "cobrana_pix_qr";
+        let sentWithTemplate = false;
+
         try {
-          await sendUmblerTextMessage({
+          const tmplRes = await sendUmblerTemplateMessage({
             apiToken,
             orgId,
             channelPhone,
             customerPhone: phoneInfo.e164,
-            text: `Aqui está sua chave PIX Copia e Cola para liberação dos arquivos completos em alta resolução:\n\n${pixCode}\n\nApós o pagamento, os 4 arquivos finais e o link do seu drive serão liberados automaticamente!`,
+            templateNameOrId: pixTemplateName,
+            params: [pixCode],
           });
-        } catch {}
+
+          if (tmplRes.ok) {
+            sentWithTemplate = true;
+            console.log(`[PIX] Template "${pixTemplateName}" enviado com sucesso via botão Meta!`);
+          } else {
+            console.warn(`[PIX] Aviso ao enviar template "${pixTemplateName}":`, tmplRes);
+          }
+        } catch (tErr: any) {
+          console.warn("[Umbler Template PIX Warning]:", tErr.message);
+        }
+
+        // Se o template falhar por qualquer motivo, envia a chave direta sem links
+        if (!sentWithTemplate) {
+          try {
+            await sendUmblerTextMessage({
+              apiToken,
+              orgId,
+              channelPhone,
+              customerPhone: phoneInfo.e164,
+              text: `Aqui está o seu Pix para liberação das suas músicas em alta definição e playbacks! 🎶\n\n💵 *Valor:* R$ 49,90\n\n📋 *Chave Pix Copia e Cola:* (toque abaixo para copiar)\n\`\`\`\n${pixCode}\n\`\`\`\n\nAssim que o pagamento for identificado, enviaremos automaticamente todas as suas faixas completas aqui na conversa!`,
+            });
+          } catch {}
+        }
       }
     }
 
