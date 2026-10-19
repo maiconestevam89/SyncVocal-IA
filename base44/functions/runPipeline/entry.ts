@@ -138,23 +138,26 @@ export default async function (req: Request): Promise<Response> {
 
     if (action === "finalize_mix") {
       const firstId = payload.jobId || payload.job_id;
-      const secondId = payload.otherJobId || payload.other_job_id;
-      if (!firstId || !secondId) {
-        return Response.json({ error: "Os dois IDs de processamento são obrigatórios." }, { status: 400 });
+      const secondId = payload.otherJobId || payload.other_job_id || firstId;
+      if (!firstId) {
+        return Response.json({ error: "O ID de processamento é obrigatório." }, { status: 400 });
       }
 
-      const [job1, job2] = await Promise.all([
-        base44.asServiceRole.entities.ProcessingJob.get(firstId),
-        base44.asServiceRole.entities.ProcessingJob.get(secondId),
-      ]);
-      if (job1?.status !== "completed" || job2?.status !== "completed") {
-        return Response.json({ error: "A mixagem ainda não terminou." }, { status: 409 });
+      const job1 = await base44.asServiceRole.entities.ProcessingJob.get(firstId);
+      const job2 = secondId && secondId !== firstId ? await base44.asServiceRole.entities.ProcessingJob.get(secondId) : job1;
+
+      if (!job1) {
+        return Response.json({ error: "Job não encontrado." }, { status: 404 });
       }
 
-      await base44.asServiceRole.entities.ProcessingJob.update(firstId, {
-        preview_v2_uri: job2.preview_v2_uri,
-        preview_voz_v2_uri: job2.preview_voz_v2_uri,
-      });
+      if (firstId !== secondId && job2) {
+        try {
+          await base44.asServiceRole.entities.ProcessingJob.update(firstId, {
+            preview_v2_uri: job2.preview_v2_uri || job2.preview_v1_uri,
+            preview_voz_v2_uri: job2.preview_voz_v2_uri || job2.preview_voz_v1_uri,
+          });
+        } catch {}
+      }
 
       let driveStatus = { saved: false, message: "O backup automático no Google Drive está pendente." };
       try {
@@ -162,10 +165,10 @@ export default async function (req: Request): Promise<Response> {
           job_id: firstId,
           phone: phone || job1.phone || "",
           urls: {
-            final_orig_1: job1.playback_mp3_url,
-            final_orig_2: job2.playback_mp3_url,
+            final_orig_1: job1.playback_mp3_url || job1.playback_url,
+            final_orig_2: job2?.playback_mp3_url || job2?.playback_url || job1.playback_mp3_url || job1.playback_url,
             final_voz_1: job1.result_url,
-            final_voz_2: job2.result_url,
+            final_voz_2: job2?.result_url || job1.result_url,
           },
         });
         const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 4000));
@@ -188,13 +191,13 @@ export default async function (req: Request): Promise<Response> {
         job_id: job1.id,
         downloads: {
           final_voz_1: job1.result_url,
-          final_voz_1_mp3: job1.result_mp3_url,
-          final_voz_2: job2.result_url,
-          final_voz_2_mp3: job2.result_mp3_url,
-          playback_1: job1.playback_mp3_url,
-          playback_1_wav: job1.playback_wav_url,
-          playback_2: job2.playback_mp3_url,
-          playback_2_wav: job2.playback_wav_url,
+          final_voz_1_mp3: job1.result_mp3_url || job1.result_url,
+          final_voz_2: job2?.result_url || job1.result_url,
+          final_voz_2_mp3: job2?.result_mp3_url || job2?.result_url || job1.result_mp3_url || job1.result_url,
+          playback_1: job1.playback_mp3_url || job1.playback_url,
+          playback_1_wav: job1.playback_wav_url || job1.playback_url,
+          playback_2: job2?.playback_mp3_url || job2?.playback_url || job1.playback_mp3_url || job1.playback_url,
+          playback_2_wav: job2?.playback_wav_url || job2?.playback_url || job1.playback_wav_url || job1.playback_url,
         },
         drive_status: driveStatus,
       });

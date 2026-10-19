@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Music, ArrowRight, Sparkles, Upload, Mic, ShieldAlert,
   RotateCcw, Headphones, CheckCircle2, FileMusic, Loader2, Send,
-  Trash2, Sliders, Layers, Wand2, AlertTriangle, KeyRound, X
+  Trash2, Sliders, Layers, Wand2, AlertTriangle, KeyRound
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,7 @@ export default function Landing() {
   const [clientAudioUri, setClientAudioUri] = useState(null);
   const [uploadingClientAudio, setUploadingClientAudio] = useState(false);
 
-  const [arrangementMode, setArrangementMode] = useState("generate_suno");
+  const [arrangementMode, setArrangementMode] = useState("pre_generated");
   const [selectedStyle, setSelectedStyle] = useState("Sertanejo");
   const [customStyle, setCustomStyle] = useState("");
   const [generatedPrompt, setGeneratedPrompt] = useState("");
@@ -328,20 +328,45 @@ export default function Landing() {
       throw new Error("A mixagem não concluiu dentro do tempo esperado. Consulte o status do job antes de iniciar outra produção.");
     }
 
-    const [job1, job2] = completedJobs;
-    const finalResponse = await base44.functions.invoke("runPipeline", {
-      action: "finalize_mix",
-      jobId: job1.id,
-      otherJobId: job2.id,
-      phone,
-    });
-    const finalData = finalResponse.data || finalResponse;
-    if (!finalData?.success) {
-      throw new Error(finalData?.error || "Não foi possível finalizar os downloads da produção.");
-    }
+    const job1 = completedJobs[0];
+    const job2 = completedJobs[1] || job1;
 
-    setJobResults(finalData);
+    // Libera a tela de resultados imediatamente com os arquivos já processados
+    const directResults = {
+      success: true,
+      job: { id: job1.id, phone: job1.phone || phone || "" },
+      job_id: job1.id,
+      downloads: {
+        final_voz_1: job1.result_url,
+        final_voz_1_mp3: job1.result_mp3_url || job1.result_url,
+        final_voz_2: job2?.result_url || job1.result_url,
+        final_voz_2_mp3: job2?.result_mp3_url || job2?.result_url || job1.result_mp3_url || job1.result_url,
+        playback_1: job1.playback_mp3_url || job1.playback_url,
+        playback_1_wav: job1.playback_wav_url || job1.playback_url,
+        playback_2: job2?.playback_mp3_url || job2?.playback_url || job1.playback_mp3_url || job1.playback_url,
+        playback_2_wav: job2?.playback_wav_url || job2?.playback_url || job1.playback_wav_url || job1.playback_url,
+      },
+      drive_status: { saved: false, message: "Pronto para download." },
+    };
+
+    setJobResults(directResults);
     setFlowStage("ready");
+
+    // Executa backup no Google Drive e sincronização Umbler em segundo plano sem bloquear a interface
+    try {
+      const finalResponse = await base44.functions.invoke("runPipeline", {
+        action: "finalize_mix",
+        jobId: job1.id,
+        otherJobId: job2.id,
+        phone,
+      });
+      const finalData = finalResponse?.data || finalResponse;
+      if (finalData?.downloads) {
+        setJobResults(finalData);
+      }
+    } catch (finalizeErr) {
+      console.warn("Aviso na finalização secundária:", finalizeErr);
+    }
   };
 
   const executePipeline = async (clientUri, preGenUris = {}) => {
@@ -386,7 +411,7 @@ export default function Landing() {
         setPipelineMessage("Passo 1/3: Criando arranjo musical com IA (Suno)...");
         const sunoInit = await base44.functions.invoke("runPipeline", {
           action: "create_suno",
-          lyrics: customerLyrics || "Música personalizada",
+          lyrics: customStyle || generatedPrompt || selectedStyle || "Música personalizada",
           musicPrompt: styleToUse,
         });
 
@@ -499,7 +524,7 @@ export default function Landing() {
   const handleSendPreview = async () => {
     setSendingPreview(true);
     try {
-      const res = await base44.functions.sendUmblerPreview({
+      const res = await base44.functions.invoke("sendUmblerPreview", {
         job_id: jobResults?.job?.id || jobResults?.job_id,
         phone: phone || jobResults?.job?.phone,
         customer_name: customerName,
