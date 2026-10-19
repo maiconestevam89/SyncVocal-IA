@@ -14,8 +14,8 @@ import {
 
 // Downloads the isolated vocals and instrumental from storage, aligns the
 // client vocal to the reference, applies a silence gate, auto-matches gains,
-// and mixes into a final track. Also creates a 70-second MP3 preview for the
-// WhatsApp flow. Both files are uploaded to private storage.
+// and mixes one version at a time. It stores final WAV/MP3, playback WAV/MP3,
+// and 70-second previews in private storage for the async production workflow.
 //
 // Memory strategy:
 // - Decode directly to mono at 22050 Hz (via decodeWavMonoAtRate), avoiding
@@ -29,6 +29,15 @@ import {
 // Returns: { result_url, preview_url }
 
 const PROCESS_RATE = 22050;
+
+async function resolveAudioUrl(base44: any, source: string): Promise<string> {
+  if (/^https?:\/\//i.test(source)) return source;
+  const signed = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({
+    file_uri: source,
+    expires_in: 86400,
+  });
+  return signed.signed_url;
+}
 
 // Fetch directly as ArrayBuffer — avoids the Blob intermediate that doubles memory.
 async function fetchArrayBuffer(url) {
@@ -63,7 +72,7 @@ export default async function(req) {
     const base44 = createClientFromRequest(req);
 
     const body = await req.json();
-    const { job_id, vocal1_uri, vocal2_uri, instrumental_uri } = body;
+    const { job_id, vocal1_uri, vocal2_uri, instrumental_uri, version = 1 } = body;
     if (!vocal1_uri || !vocal2_uri || !instrumental_uri) {
       return Response.json({ error: "URIs ausentes." }, { status: 400 });
     }
@@ -73,15 +82,15 @@ export default async function(req) {
         await base44.asServiceRole.entities.ProcessingJob.update(job_id, { status: "processing" });
       }
 
-      // Create signed URLs for all three files at once (cheap, no data transferred)
-      const [v1Signed, v2Signed, instSigned] = await Promise.all([
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: vocal1_uri }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: vocal2_uri }),
-        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: instrumental_uri }),
+      // Accept either private Base44 file URIs or temporary provider URLs.
+      const [v1Url, v2Url, instUrl] = await Promise.all([
+        resolveAudioUrl(base44, vocal1_uri),
+        resolveAudioUrl(base44, vocal2_uri),
+        resolveAudioUrl(base44, instrumental_uri),
       ]);
 
       // ── STEP 1: Load vocal1 (reference) → extract features + silence gate → free ──
-      const vocal1 = decodeWavMonoAtRate(await fetchArrayBuffer(v1Signed.signed_url), PROCESS_RATE);
+      const vocal1 = decodeWavMonoAtRate(await fetchArrayBuffer(v1Url), PROCESS_RATE);
       const refDur = vocal1.channels[0].length / vocal1.sampleRate;
       const hop = Math.max(0.04, refDur / 5000);
 
@@ -96,7 +105,7 @@ export default async function(req) {
       refMono.fill(0);
 
       // ── STEP 2: Load vocal2 (client) → align to reference → free ──
-      const vocal2 = decodeWavMonoAtRate(await fetchArrayBuffer(v2Signed.signed_url), PROCESS_RATE);
+      const vocal2 = decodeWavMonoAtRate(await fetchArrayBuffer(v2Url), PROCESS_RATE);
       const vocalDur = vocal2.channels[0].length / vocal2.sampleRate;
       const vocalHop = Math.max(0.04, Math.max(refDur, vocalDur) / 5000);
 
@@ -132,7 +141,7 @@ export default async function(req) {
       vocalMono.fill(0);
 
       // ── STEP 3: Load instrumental → gate → mix → free ──
-      const instrumental = decodeWavMonoAtRate(await fetchArrayBuffer(instSigned.signed_url), PROCESS_RATE);
+      const instrumental = decodeWavMonoAtRate(await fetchArrayBuffer(instUrl), PROCESS_RATE);
 
       // Resample aligned to instrumental's sample rate (same rate, so no-op)
       const alignedResampled = resampleMono(aligned, vocal2.sampleRate, instrumental.sampleRate);
@@ -158,42 +167,66 @@ export default async function(req) {
         mixed[i] = v;
       }
 
-      // Free intermediates
-      instrumental.channels = null;
+      // Free intermediates after mixing, while retaining the instrumental for WAV/MP3 exports.
       gated[0].fill(0);
       alignedResampled[0].fill(0);
 
-      // ── STEP 4: Encode full mix as WAV and upload ──
+      // ── STEP 4: Persist final mix, previews, and downloadable playback formats ──
       const wavBytes = encodeWav([mixed], instrumental.sampleRate);
       const resultFile = new File([new Blob([wavBytes])], "result.wav", { type: "audio/wav" });
       const { file_uri: result_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: resultFile });
-      const { signed_url: result_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_uri, expires_in: 3600 });
 
-      // ── STEP 5: Create 70-second MP3 preview and upload ──
-      const previewSeconds = 70;
-      const previewLen = Math.min(mixed.length, Math.floor(previewSeconds * instrumental.sampleRate));
-      const previewChannels = [mixed.subarray(0, previewLen)];
-      const mp3Bytes = encodeMp3(previewChannels, instrumental.sampleRate, 192);
-      const previewFile = new File([new Blob([mp3Bytes])], "preview.mp3", { type: "audio/mpeg" });
+      const resultMp3Bytes = encodeMp3([mixed], instrumental.sampleRate, 192);
+      const resultMp3File = new File([new Blob([resultMp3Bytes])], "result.mp3", { type: "audio/mpeg" });
+      const { file_uri: result_mp3_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: resultMp3File });
+
+      const previewLen = Math.min(mixed.length, Math.floor(70 * instrumental.sampleRate));
+      const previewBytes = encodeMp3([mixed.subarray(0, previewLen)], instrumental.sampleRate, 192);
+      const previewFile = new File([new Blob([previewBytes])], "preview-voice.mp3", { type: "audio/mpeg" });
       const { file_uri: preview_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: previewFile });
-      const { signed_url: preview_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: preview_uri, expires_in: 3600 });
 
-      // Free mixed
+      const playbackWavBytes = encodeWav(instrumental.channels, instrumental.sampleRate);
+      const playbackWavFile = new File([new Blob([playbackWavBytes])], "playback.wav", { type: "audio/wav" });
+      const { file_uri: playback_wav_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: playbackWavFile });
+
+      const playbackMp3Bytes = encodeMp3(instrumental.channels, instrumental.sampleRate, 192);
+      const playbackMp3File = new File([new Blob([playbackMp3Bytes])], "playback.mp3", { type: "audio/mpeg" });
+      const { file_uri: playback_mp3_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: playbackMp3File });
+
+      const playbackPreviewLen = Math.min(instrumental.channels[0].length, Math.floor(70 * instrumental.sampleRate));
+      const playbackPreviewBytes = encodeMp3([instrumental.channels[0].subarray(0, playbackPreviewLen)], instrumental.sampleRate, 192);
+      const playbackPreviewFile = new File([new Blob([playbackPreviewBytes])], "preview-playback.mp3", { type: "audio/mpeg" });
+      const { file_uri: playback_preview_uri } = await base44.asServiceRole.integrations.Core.UploadPrivateFile({ file: playbackPreviewFile });
+
+      const playback_url = instUrl;
       mixed.fill(0);
+      instrumental.channels[0].fill(0);
 
-      // Create signed URL for the instrumental (playback) — original quality from Kits.ai
-      const { signed_url: playback_url } = await base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: instrumental_uri, expires_in: 3600 });
+      const [result_url, result_mp3_url, preview_url, playback_wav_url, playback_mp3_url] = await Promise.all([
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_uri, expires_in: 86400 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: result_mp3_uri, expires_in: 86400 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: preview_uri, expires_in: 86400 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_wav_uri, expires_in: 86400 }),
+        base44.asServiceRole.integrations.Core.CreateFileSignedUrl({ file_uri: playback_mp3_uri, expires_in: 86400 }),
+      ]).then((items: any[]) => items.map((item) => item.signed_url));
 
       if (job_id) {
+        const versionFields = Number(version) === 2
+          ? { final_v2_uri: result_uri, preview_v2_uri: playback_preview_uri, preview_voz_v2_uri: preview_uri }
+          : { final_v1_uri: result_uri, preview_v1_uri: playback_preview_uri, preview_voz_v1_uri: preview_uri };
         await base44.asServiceRole.entities.ProcessingJob.update(job_id, {
           result_url,
+          result_mp3_url,
           playback_url,
+          playback_wav_url,
+          playback_mp3_url,
           preview_url,
           status: "completed",
+          ...versionFields,
         });
       }
 
-      return Response.json({ result_url, preview_url, playback_url });
+      return Response.json({ result_url, result_mp3_url, preview_url, playback_url, playback_wav_url, playback_mp3_url });
     } catch (error) {
       if (job_id) {
         try {
